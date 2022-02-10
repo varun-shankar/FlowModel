@@ -17,11 +17,13 @@ case = '../OpenFoam/cylinder2D_base'
 
 dt = 0.05
 ts = torch.arange(3,6.001,step=dt)
-p, b, v = load_case(case,['p','U'],ts,['internal','cylinder'])
+zones = ['internal','cylinder','inlet','outlet','top','bottom']
+p, b, v = load_case(case, ['p','U'], ts, zones)
 
 # Sample internal nodes
 num_nodes = 5000
-idx = torch.randperm(p[0].shape[0])[:num_nodes]
+n_bounds = sum([len(b[i+1]) for i in range(len(b)-1)])
+idx = torch.randperm(p[0].shape[0])[:num_nodes-n_bounds]
 p[0] = p[0][idx,:]; b[0] = b[0][idx]; v[0] = v[0][:,idx,:] 
 
 pos = torch.cat(p,dim=0)
@@ -31,10 +33,12 @@ features = torch.cat([b1hot.unsqueeze(0).repeat(len(ts),1,1),fields],dim=-1)
 
 # Generate graph
 rc = .03
-edge_index = radius_graph(pos, r=rc)
+edge_index = radius_graph(pos, r=rc, max_num_neighbors=32)
 
 ### Generate dataset/loaders ###
-dataset = [Data(x=features[i,:,:], edge_index=edge_index, pos=pos, rc=rc, dt=dt, y=fields[i+1,:,:]) for i in range(len(ts)-1)]
+rollout = 1
+dataset = [Data(x=features[i,:,:], y=fields[i+1:i+1+rollout,:,:], 
+                pos=pos, edge_index=edge_index, rc=rc, dt=dt) for i in range(len(ts)-1)]
 # random.shuffle(dataset)
 train_data = dataset[:int((len(dataset)+1)*.9)] 
 val_data = dataset[int((len(dataset)+1)*.9):]
@@ -43,22 +47,22 @@ val_loader = DataLoader(val_data, num_workers=8)
 
 ### Model definition ###
 from model_def import LitModel
-irreps_in = "3x0e + 1o"
-irreps_out = "0e + 1o"
-irreps_latent = "16x0e + 16x1o"
+irreps_in = f'{len(zones)+1:g}'+'x0e + 1o'
+irreps_out = '0e + 1o'
+irreps_latent = '16x0e + 16x1o'
 
 ### Lightning setup ###
-wandb_logger = WandbLogger(project="e3nn-opt", log_model=True)
+wandb_logger = WandbLogger(project='e3nn-opt', log_model=True)
 load_checkpoint = False
 if load_checkpoint:
-    checkpoint_reference = "vshankar/e3nn-opt/model-3nspch19:v0"
-    run = wandb.init(project="e3nn-opt")
-    artifact = run.use_artifact(checkpoint_reference, type="model")
+    checkpoint_reference = 'vshankar/e3nn-opt/model-3nspch19:v0'
+    run = wandb.init(project='e3nn-opt')
+    artifact = run.use_artifact(checkpoint_reference, type='model')
     artifact_dir = artifact.download()
-    model = LitModel.load_from_checkpoint(artifact_dir+"/model.ckpt")
+    model = LitModel.load_from_checkpoint(artifact_dir+'/model.ckpt')
 else:
     model = LitModel(irreps_in, irreps_latent, irreps_out)
-    wandb_logger.experiment.config.update({"R_c": rc, "Num_nodes": num_nodes})
+    wandb_logger.experiment.config.update({'R_c': rc, 'Num_nodes': num_nodes, 'Rollout': rollout})
 
 ### Train ###
 trainer = pl.Trainer(gpus=1, logger=wandb_logger, max_epochs=500)

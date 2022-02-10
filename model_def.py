@@ -79,7 +79,7 @@ class NLMP(torch.nn.Module):
         self.irreps_output = o3.Irreps(irreps_output)
         irreps_scalars = o3.Irreps([(mul, ir) for mul, ir in self.irreps_output if ir.l == 0]).simplify()
         irreps_gated = o3.Irreps([(mul, ir) for mul, ir in self.irreps_output if ir.l > 0]).simplify()
-        irreps_gates = o3.Irreps([(mul, "0e") for mul, _ in irreps_gated]).simplify()
+        irreps_gates = o3.Irreps([(mul, '0e') for mul, _ in irreps_gated]).simplify()
         self.gate = nn.Gate(irreps_scalars, [act for _, ir in irreps_scalars],
                             irreps_gates, [act for _, ir in irreps_gates], irreps_gated)
         self.irreps_sh = o3.Irreps(irreps_sh)
@@ -133,10 +133,15 @@ class LitModel(pl.LightningModule):
 
         h = data.x
         h = self.enc(h)
-        h = h + self.f(h, data)*data.dt
-        h = self.dec(h)
+        hs = []
+        for i in range(data.y.shape[0]):
+            h = h + self.f(h, data)*data.dt
+            hs.append(h)
+        hs = torch.stack(hs)
 
-        return h
+        hs = self.dec(hs)
+
+        return hs
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
@@ -146,14 +151,14 @@ class LitModel(pl.LightningModule):
         data = batch
         y_hat = self(data)
         loss = F.mse_loss(y_hat, data.y)
-        self.log("train_loss", loss, batch_size=data.num_graphs)
+        self.log('train_loss', loss, batch_size=data.num_graphs)
         return loss
 
     def validation_step(self, batch, batch_idx):
         data = batch
         y_hat = self(data)
         loss = F.mse_loss(y_hat, data.y)
-        self.log("val_loss", loss, batch_size=data.num_graphs)
+        self.log('val_loss', loss, batch_size=data.num_graphs)
         return loss
 
 
