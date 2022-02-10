@@ -1,6 +1,17 @@
 import torch
 import numpy as np
 import fluidfoam as ff
+import sys, traceback
+
+class Suppressor(object):
+    def __enter__(self):
+        self.stdout = sys.stdout
+        sys.stdout = self
+    def __exit__(self, type, value, traceback):
+        sys.stdout = self.stdout
+        if type is not None:
+            raise
+    def write(self, x): pass
 
 def read_field_snap(dir,t,f,b,numpts):
     tstr = f'{t:g}'
@@ -15,7 +26,7 @@ def read_mesh_and_field(dir,b,fields,ts):
     v = torch.stack([torch.cat([read_field_snap(dir,t,f,b,numpts) for f in fields],dim=-1) for t in ts])
     return p, v, numpts
 
-def load_case(dir,fields=[],ts=[0.],bounds=['internal']):
+def load_case(dir,fields=[],ts=[0.],bounds=['internal'],verbose=False):
     bounds.remove('internal') if 'internal' in bounds else False
     bounds.insert(0,'internal')
     p = []
@@ -25,7 +36,11 @@ def load_case(dir,fields=[],ts=[0.],bounds=['internal']):
     i = 0
     for b in bounds:
         b = None if b == 'internal' else b
-        pb, vb, numb = read_mesh_and_field(dir,b,fields,ts)
+        if verbose:
+            pb, vb, numb = read_mesh_and_field(dir,b,fields,ts)
+        else:
+            with Suppressor():
+                pb, vb, numb = read_mesh_and_field(dir,b,fields,ts)
         p.append(pb)
         b_ind.append((i*torch.ones(numb)).long())
         v.append(vb)

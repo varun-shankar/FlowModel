@@ -1,55 +1,29 @@
 import torch
-import random
-import numpy as np
-import torch.nn.functional as F
-from torch_cluster import knn_graph, radius_graph
-import fluidfoam as ff
-from load_OF import load_case
-from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
-from torch.nn import Sequential as Seq, Linear, ReLU, Tanh
+from train_funcs import *
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 import wandb
 
+### Config ###
+config = dict(
+    num_nodes = 5000,
+    rollout = 1,
+    rc = .03,
+    latent_layers = 4,
+    latent_scalars = 32,
+    latent_vectors = 8,
+    epochs = 400,
+)
+
 ### Read data ###
 case = '../OpenFoam/cylinder2D_base'
-
-dt = 0.05
-ts = torch.arange(3,6.001,step=dt)
 zones = ['internal','cylinder','inlet','outlet','top','bottom']
-p, b, v = load_case(case, ['p','U'], ts, zones)
+data_fields=['p','U']
+ts = torch.arange(3,6.001,step=0.05)
+train_loader, val_loader = build_dataset(case, zones, ts, config.rc, 
+                                         num_nodes=config.num_nodes, rollout=config.rollout,
+                                         data_fields=data_fields, train_split=0.9)
 
-# Sample internal nodes
-num_nodes = 5000
-n_bounds = sum([len(b[i+1]) for i in range(len(b)-1)])
-idx = torch.randperm(p[0].shape[0])[:num_nodes-n_bounds]
-p[0] = p[0][idx,:]; b[0] = b[0][idx]; v[0] = v[0][:,idx,:] 
-
-pos = torch.cat(p,dim=0)
-b1hot = F.one_hot(torch.cat(b,dim=0))
-fields = torch.cat(v,dim=1)
-features = torch.cat([b1hot.unsqueeze(0).repeat(len(ts),1,1),fields],dim=-1)
-
-# Generate graph
-rc = .03
-edge_index = radius_graph(pos, r=rc, max_num_neighbors=32)
-
-### Generate dataset/loaders ###
-rollout = 1
-dataset = [Data(x=features[i,:,:], y=fields[i+1:i+1+rollout,:,:], 
-                pos=pos, edge_index=edge_index, rc=rc, dt=dt) for i in range(len(ts)-1)]
-# random.shuffle(dataset)
-train_data = dataset[:int((len(dataset)+1)*.9)] 
-val_data = dataset[int((len(dataset)+1)*.9):]
-train_loader = DataLoader(train_data, num_workers=8)
-val_loader = DataLoader(val_data, num_workers=8)
-
-### Model definition ###
-from model_def import LitModel
-irreps_in = f'{len(zones)+1:g}'+'x0e + 1o'
-irreps_out = '0e + 1o'
-irreps_latent = '16x0e + 16x1o'
 
 ### Lightning setup ###
 wandb_logger = WandbLogger(project='e3nn-opt', log_model=True)
@@ -61,11 +35,13 @@ if load_checkpoint:
     artifact_dir = artifact.download()
     model = LitModel.load_from_checkpoint(artifact_dir+'/model.ckpt')
 else:
-    model = LitModel(irreps_in, irreps_latent, irreps_out)
-    wandb_logger.experiment.config.update({'R_c': rc, 'Num_nodes': num_nodes, 'Rollout': rollout})
+    model = build_model(len(zones)+1, 1,
+                    config.latent_layers, config.latent_scalars, config.latent_vectors,
+                    1, 1)
+    wandb_logger.experiment.config.update(config)
 
 ### Train ###
-trainer = pl.Trainer(gpus=1, logger=wandb_logger, max_epochs=500)
+trainer = pl.Trainer(gpus=1, logger=wandb_logger, max_epochs=config.epochs)
 wandb_logger.watch(model)
 trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
 

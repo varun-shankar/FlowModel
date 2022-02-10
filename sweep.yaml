@@ -1,0 +1,19 @@
+program: sweep_train.py
+method: random
+project: e3nn-opt
+metric:
+  name: val_loss
+  goal: minimize
+parameters:
+  rc:
+    min: 0.01
+    max: 0.03
+  latent_layers:
+    min: 1
+    max: 10
+  latent_scalars:
+    min: 4
+    max: 32
+  latent_vectors:
+    min: 2
+    max: 16

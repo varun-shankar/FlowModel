@@ -101,32 +101,29 @@ class NLMP(torch.nn.Module):
 
 
 class dudt(torch.nn.Module):
-    def __init__(self, irreps_latent):
+    def __init__(self, irreps_latent, num_layers):
         super(dudt, self).__init__()
 
-        self.conv1 = NLMP(irreps_latent, irreps_latent)
-        self.conv2 = NLMP(irreps_latent, irreps_latent)
-        self.conv3 = NLMP(irreps_latent, irreps_latent)
-        self.conv4 = NLMP(irreps_latent, irreps_latent)
+        self.layers = torch.nn.ModuleList()
+        for i in range(num_layers):
+            self.layers.append(NLMP(irreps_latent, irreps_latent))
 
     def forward(self, x, data):
 
         h = x
-        h = self.conv1(h, data.pos, data.edge_index, data.rc)
-        h = self.conv2(h, data.pos, data.edge_index, data.rc)
-        h = self.conv3(h, data.pos, data.edge_index, data.rc)
-        h = self.conv4(h, data.pos, data.edge_index, data.rc)
-        
+        for i in range(len(self.layers)):
+            h = self.layers[i](h, data.pos, data.edge_index, data.rc)
+
         return h
 
 
 class LitModel(pl.LightningModule):
-    def __init__(self, irreps_in, irreps_latent, irreps_out):
+    def __init__(self, irreps_in, irreps_latent, irreps_out, latent_layers=4):
         super().__init__()
         self.save_hyperparameters()
         
         self.enc = o3.Linear(irreps_in, irreps_latent)
-        self.f = dudt(irreps_latent)
+        self.f = dudt(irreps_latent, latent_layers)
         self.dec = o3.Linear(irreps_latent, irreps_out)
 
     def forward(self, data):
@@ -135,10 +132,9 @@ class LitModel(pl.LightningModule):
         h = self.enc(h)
         hs = []
         for i in range(data.y.shape[0]):
-            h = h + self.f(h, data)*data.dt
+            h = h + self.f(h, data)*data.dts[i]
             hs.append(h)
         hs = torch.stack(hs)
-
         hs = self.dec(hs)
 
         return hs
