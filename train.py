@@ -15,10 +15,14 @@ config = dict(
     epochs = 400,
 )
 
+wandb_logger = WandbLogger(project='flow-model', log_model=True)
+wandb_logger.experiment.config.update(config)
+config = wandb.config
+
 ### Read data ###
 case = '../OpenFoam/cylinder2D_base'
 zones = ['internal','cylinder','inlet','outlet','top','bottom']
-data_fields=['p','U']
+data_fields = ['p','U']
 ts = torch.arange(3,6.001,step=0.05)
 train_loader, val_loader = build_dataset(case, zones, ts, config.rc, 
                                          num_nodes=config.num_nodes, rollout=config.rollout,
@@ -26,11 +30,11 @@ train_loader, val_loader = build_dataset(case, zones, ts, config.rc,
 
 
 ### Lightning setup ###
-wandb_logger = WandbLogger(project='e3nn-opt', log_model=True)
+
 load_checkpoint = False
 if load_checkpoint:
-    checkpoint_reference = 'vshankar/e3nn-opt/model-3nspch19:v0'
-    run = wandb.init(project='e3nn-opt')
+    checkpoint_reference = 'vshankar/flow-model/model-3nspch19:v0'
+    run = wandb.init(project='flow-model')
     artifact = run.use_artifact(checkpoint_reference, type='model')
     artifact_dir = artifact.download()
     model = LitModel.load_from_checkpoint(artifact_dir+'/model.ckpt')
@@ -38,7 +42,6 @@ else:
     model = build_model(len(zones)+1, 1,
                     config.latent_layers, config.latent_scalars, config.latent_vectors,
                     1, 1)
-    wandb_logger.experiment.config.update(config)
 
 ### Train ###
 trainer = pl.Trainer(gpus=1, logger=wandb_logger, max_epochs=config.epochs)

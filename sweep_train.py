@@ -20,7 +20,7 @@ config = wandb.config
 
 case = '../OpenFoam/cylinder2D_base'
 zones = ['internal','cylinder','inlet','outlet','top','bottom']
-data_fields=['p','U']
+data_fields = ['p','U']
 ts = torch.arange(3,6.001,step=0.05)
 train_loader, val_loader = build_dataset(case, zones, ts, config.rc, 
                                          num_nodes=config.num_nodes, rollout=config.rollout,
@@ -29,7 +29,7 @@ model = build_model(len(zones)+1, 1,
                     config.latent_layers, config.latent_scalars, config.latent_vectors,
                     1, 1)
 
-wandb_logger = WandbLogger(project='e3nn-opt', log_model=True)
+wandb_logger = WandbLogger(project='flow-model', log_model=True)
 trainer = pl.Trainer(gpus=1, logger=wandb_logger, max_epochs=config.epochs)
 wandb_logger.watch(model)
 trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
