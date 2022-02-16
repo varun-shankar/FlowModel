@@ -1,66 +1,71 @@
 import torch
-from train_funcs import *
+from types import SimpleNamespace
+from data import OFDataModule
+from model_def import LitModel, build_model
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.plugins import DDPPlugin
 import wandb
+import os
+import glob
+os.environ['WANDB_START_METHOD'] = 'thread'
+pl.seed_everything(42)
 
 ### Config ###
 config = dict(
     num_nodes = 5000,
+    dt = .01,
     rollout = 1,
-    rc = .03,
+    test_rollout = 10,
+    rc = .04,
     latent_layers = 4,
-    latent_scalars = 32,
-    latent_vectors = 8,
-    epochs = 400,
+    latent_scalars = 16,
+    latent_vectors = 16,
+    batch_size = 1,
+    lr = 0.002 * 8,
+    epochs = 200,
 )
-
-wandb_logger = WandbLogger(project='flow-model', log_model=True)
-wandb_logger.experiment.config.update(config)
-config = wandb.config
+load_checkpoint = False
+wandb_logger = WandbLogger(project='flow-model', log_model='all', job_type='train', config=config)
+config = SimpleNamespace(**config)
 
 ### Read data ###
 case = '../OpenFoam/cylinder2D_base'
 zones = ['internal','cylinder','inlet','outlet','top','bottom']
 data_fields = ['p','U']
-ts = torch.arange(3,6.001,step=0.05)
-train_loader, val_loader = build_dataset(case, zones, ts, config.rc, 
-                                         num_nodes=config.num_nodes, rollout=config.rollout,
-                                         data_fields=data_fields, train_split=0.9)
+ts = torch.arange(3,6.001,step=config.dt)
+test_ts = torch.arange(6,6.101,step=config.dt)
+dm = OFDataModule(
+    case, zones, ts, config.rc, 
+    num_nodes=config.num_nodes, rollout=config.rollout,
+    data_fields=data_fields, train_split=0.9,
+    test_ts=test_ts, test_rollout=config.test_rollout,
+    shuffle=True, batch_size=config.batch_size
+)
 
 
 ### Lightning setup ###
-
-load_checkpoint = False
 if load_checkpoint:
-    checkpoint_reference = 'vshankar/flow-model/model-3nspch19:v0'
-    run = wandb.init(project='flow-model')
-    artifact = run.use_artifact(checkpoint_reference, type='model')
-    artifact_dir = artifact.download()
-    model = LitModel.load_from_checkpoint(artifact_dir+'/model.ckpt')
+    latest = max(glob.glob('checkpoints/*'), key=os.path.getctime)
+    print('Loading '+latest)
+    model = LitModel.load_from_checkpoint(latest)
 else:
-    model = build_model(len(zones)+1, 1,
-                    config.latent_layers, config.latent_scalars, config.latent_vectors,
-                    1, 1)
+    model = build_model(
+        len(zones)+1, 1,
+        config.latent_layers, config.latent_scalars, config.latent_vectors,
+        1, 1,
+        config.lr
+    )
 
 ### Train ###
-trainer = pl.Trainer(gpus=1, logger=wandb_logger, max_epochs=config.epochs)
+checkpoint_callback = ModelCheckpoint(monitor='val_loss', dirpath='checkpoints/', filename='best')
+trainer = pl.Trainer(
+    gpus=-1, strategy=DDPPlugin(find_unused_parameters=False), precision=16, 
+    logger=wandb_logger, callbacks=[checkpoint_callback],
+    max_epochs=config.epochs
+)
 wandb_logger.watch(model)
-trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+trainer.fit(model, dm)
 
-### Equivariance check ###
-from model_def import rot_data
-from e3nn import o3
-
-data = dataset[-1]
-pred = model(data)
-torch.save((data,pred),'data.pt')
-
-rot = o3.rand_matrix()
-rot_data, D_in, D_out = rot_data(data, irreps_in, irreps_out, rot)
-
-pred_after = pred @ D_out.T
-pred_before = model(rot_data)
-
-print(torch.allclose(pred_before, pred_after, rtol=1e-3, atol=1e-3))
-print(torch.max(torch.abs(pred_before-pred_after)))
+trainer.test(model, datamodule=dm)

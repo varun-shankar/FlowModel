@@ -6,14 +6,24 @@ metric:
   name: val_loss
 parameters:
   latent_layers:
-    max: 10
-    min: 1
+    values:
+      - 3
+      - 4
+      - 5
+      - 6
   latent_scalars:
-    max: 32
-    min: 4
+    values:
+      - 0
+      - 4
+      - 8
+      - 16
+      - 32
   latent_vectors:
-    max: 16
-    min: 2
+    values:
+      - 0
+      - 4
+      - 8
+      - 12
+      - 16
   rc:
-    max: 0.035
-    min: 0.015
+    value: 0.035

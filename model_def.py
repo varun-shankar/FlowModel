@@ -1,74 +1,11 @@
 import torch
-import random
-import numpy as np
 import copy
-import torch.nn.functional as F
+from torchmetrics import MeanSquaredError
 from torch_scatter import scatter
-from torch_geometric.data import Data
-from torch_geometric.loader import DataLoader
 from torch.nn import Sequential as Seq, Linear, ReLU, Tanh
-from torch_geometric.utils import degree
 from e3nn import o3, nn
-from e3nn.math import soft_one_hot_linspace
+from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, StepLR
 import pytorch_lightning as pl
-from pytorch_lightning.loggers import WandbLogger
-import wandb
-
-# class MP(torch.nn.Module):
-#     def __init__(self, irreps_input, irreps_output, 
-#                        irreps_sh=o3.Irreps.spherical_harmonics(lmax=2), num_basis=10, fch=16):
-#         super(MP, self).__init__()
-
-#         self.irreps_input = o3.Irreps(irreps_input)
-#         self.irreps_output = o3.Irreps(irreps_output)
-#         self.irreps_sh = o3.Irreps(irreps_sh)
-#         self.tp = o3.FullyConnectedTensorProduct(2*self.irreps_input, self.irreps_sh, self.irreps_output, shared_weights=False)
-#         self.num_basis = num_basis
-#         self.fc = nn.FullyConnectedNet([self.num_basis, fch, self.tp.weight_numel], torch.relu)
-
-#     def forward(self, x, pos, edge_index, rc):
-
-#         num_nodes = pos.shape[0]
-#         edge_src, edge_dst = edge_index
-#         num_neighbors = len(edge_src) / num_nodes
-#         edge_vec = pos[edge_dst] - pos[edge_src]
-#         sh = o3.spherical_harmonics(self.irreps_sh, edge_vec, normalize=True, normalization='component')
-#         rc = rc[0].item() if torch.is_tensor(rc) else rc
-#         emb = soft_one_hot_linspace(edge_vec.norm(dim=1), 0.0, rc, self.num_basis, basis='smooth_finite', cutoff=True).mul(self.num_basis**0.5)
-#         return scatter(self.tp(torch.cat([x[edge_src],x[edge_dst]],dim=1), sh, self.fc(emb)), edge_dst, dim=0, dim_size=num_nodes).div(num_neighbors**0.5)
-
-# class dudt(torch.nn.Module):
-#     def __init__(self, num_latent):
-#         super(dudt, self).__init__()
-
-#         self.conv1 = MP([(num_latent,(0,1)),(num_latent,(1,-1))], 
-#                         [(2*num_latent,(0,1)),(num_latent,(1,-1))])
-#         self.g1 = nn.Gate([(num_latent,(0,1))], [torch.tanh], 
-#                           [(num_latent,(0,1))], [torch.tanh], [(num_latent,(1,-1))])
-#         self.conv2 = MP([(num_latent,(0,1)),(num_latent,(1,-1))], 
-#                         [(2*num_latent,(0,1)),(num_latent,(1,-1))])
-#         self.g2 = nn.Gate([(num_latent,(0,1))], [torch.tanh], 
-#                           [(num_latent,(0,1))], [torch.tanh], [(num_latent,(1,-1))])
-#         self.conv3 = MP([(num_latent,(0,1)),(num_latent,(1,-1))], 
-#                         [(2*num_latent,(0,1)),(num_latent,(1,-1))])
-#         self.g3 = nn.Gate([(num_latent,(0,1))], [torch.tanh], 
-#                           [(num_latent,(0,1))], [torch.tanh], [(num_latent,(1,-1))])
-#         self.conv4 = MP([(num_latent,(0,1)),(num_latent,(1,-1))], 
-#                         [(num_latent,(0,1)),(num_latent,(1,-1))])
-
-#     def forward(self, x, data):
-
-#         h = x
-#         h = self.conv1(h, data.pos, data.edge_index, data.rc)
-#         h = self.g1(h)
-#         h = self.conv2(h, data.pos, data.edge_index, data.rc)
-#         h = self.g2(h)
-#         h = self.conv3(h, data.pos, data.edge_index, data.rc)
-#         h = self.g3(h)
-#         h = self.conv4(h, data.pos, data.edge_index, data.rc)
-        
-#         return h
-
 
 class NLMP(torch.nn.Module):
     def __init__(self, irreps_input, irreps_output, act=torch.tanh,
@@ -87,18 +24,13 @@ class NLMP(torch.nn.Module):
         self.num_basis = num_basis
         self.fc = nn.FullyConnectedNet([self.num_basis, fch, self.tp.weight_numel], torch.relu)
 
-    def forward(self, x, pos, edge_index, rc):
+    def forward(self, x, data):
+        
+        edge_src, edge_dst = data.edge_index
+        sh = o3.spherical_harmonics(self.irreps_sh, data.edge_vec, normalize=True, normalization='component')
+        edge_ftr = self.gate(self.tp(torch.cat([x[edge_src],x[edge_dst]],dim=1), sh, self.fc(data.emb))) * data.norm.view(-1, 1)
 
-        num_nodes = pos.shape[0]
-        edge_src, edge_dst = edge_index
-        num_neighbors = len(edge_src) / num_nodes
-        edge_vec = pos[edge_dst] - pos[edge_src]
-        sh = o3.spherical_harmonics(self.irreps_sh, edge_vec, normalize=True, normalization='component')
-        rc = rc[0].item() if torch.is_tensor(rc) else rc
-        emb = soft_one_hot_linspace(edge_vec.norm(dim=1), 0.0, rc, self.num_basis, basis='smooth_finite', cutoff=True).mul(self.num_basis**0.5)
-        edge_ftr = self.gate(self.tp(torch.cat([x[edge_src],x[edge_dst]],dim=1), sh, self.fc(emb)))
-        return scatter(edge_ftr, edge_dst, dim=0, dim_size=num_nodes).div(num_neighbors**0.5)
-
+        return scatter(edge_ftr, edge_dst, dim=0, dim_size=data.num_nodes)
 
 class dudt(torch.nn.Module):
     def __init__(self, irreps_latent, num_layers):
@@ -112,22 +44,27 @@ class dudt(torch.nn.Module):
 
         h = x
         for i in range(len(self.layers)):
-            h = self.layers[i](h, data.pos, data.edge_index, data.rc)
+            h = self.layers[i](h, data)
 
         return h
 
 
 class LitModel(pl.LightningModule):
-    def __init__(self, irreps_in, irreps_latent, irreps_out, latent_layers=4):
+    def __init__(self, irreps_in, irreps_latent, irreps_out, latent_layers=4, lr=1e-3):
         super().__init__()
         self.save_hyperparameters()
         
+        self.irreps_in = irreps_in
+        self.irreps_out = irreps_out
         self.enc = o3.Linear(irreps_in, irreps_latent)
         self.f = dudt(irreps_latent, latent_layers)
         self.dec = o3.Linear(irreps_latent, irreps_out)
+        self.metric = MeanSquaredError()
+        self.lr = lr
 
     def forward(self, data):
 
+        data.embed()
         h = data.x
         h = self.enc(h)
         hs = []
@@ -140,29 +77,67 @@ class LitModel(pl.LightningModule):
         return hs
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
-        return optimizer
+        optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
+        lr_sch1 = CosineAnnealingWarmRestarts(optimizer, T_0=20)
+        lr_sch2 = StepLR(optimizer, step_size=20, gamma=0.5)
+        return [optimizer], [lr_sch1, lr_sch2]
 
     def training_step(self, batch, batch_idx):
         data = batch
         y_hat = self(data)
-        loss = F.mse_loss(y_hat, data.y)
+        loss = self.metric(y_hat, data.y)
         self.log('train_loss', loss, batch_size=data.num_graphs)
         return loss
 
     def validation_step(self, batch, batch_idx):
         data = batch
         y_hat = self(data)
-        loss = F.mse_loss(y_hat, data.y)
+        loss = self.metric(y_hat, data.y)
         self.log('val_loss', loss, batch_size=data.num_graphs)
         return loss
 
+    def test_step(self, batch, batch_idx, dataloader_idx=0):
+        if dataloader_idx == 0:
+            data = batch
+            y_hat = self(data)
+            loss = self.metric(y_hat, data.y)
+            self.log('test_loss', loss, batch_size=data.num_graphs)
 
-def rot_data(data, irreps_in, irreps_out, rot):
-    D_in = o3.Irreps(irreps_in).D_from_matrix(rot)
-    D_out = o3.Irreps(irreps_out).D_from_matrix(rot)
-    rot_data = copy.deepcopy(data)
-    rot_data.x = data.x @ D_in.T
-    rot_data.pos = data.pos @ rot.T
-    rot_data.y = data.y @ D_out.T
-    return rot_data, D_in, D_out
+            rot = o3.rand_matrix().type_as(data.x)
+            rot_data, _, _ = self.rotate_data(data, '7x0e+1x1o', '1x0e+1x1o', rot)
+            y_hat_rot = self(rot_data)
+            rot_loss = self.metric(y_hat_rot, rot_data.y)
+            self.log('test_rot_loss', rot_loss, batch_size=data.num_graphs)
+
+            if batch_idx == 0 and self.global_rank == 0:
+                torch.save((data,y_hat),'data.pt')
+        else:
+            data = batch
+            y_hat = self(data)
+            loss = self.metric(y_hat, data.y)
+            self.log('test_rollout_loss', loss, batch_size=data.num_graphs)
+
+            if batch_idx == 0 and self.global_rank == 0:
+                torch.save((data,y_hat),'data_rollout.pt')
+
+        return loss
+
+    def rotate_data(self, data, irreps_in, irreps_out, rot):
+        D_in = o3.Irreps(irreps_in).D_from_matrix(rot).type_as(data.x)
+        D_out = o3.Irreps(irreps_out).D_from_matrix(rot).type_as(data.x)
+        rot_data = copy.deepcopy(data)
+        rot_data.x = data.x @ D_in.T
+        rot_data.pos = data.pos @ rot.T
+        rot_data.y = data.y @ D_out.T
+        return rot_data, D_in, D_out
+
+def build_model(in_scalars, in_vectors,
+                latent_layers, latent_scalars, latent_vectors,
+                out_scalars, out_vectors,
+                lr):
+
+    irreps_in = f'{in_scalars:g}'+'x0e + '+f'{in_vectors:g}'+'x1o'
+    irreps_out = f'{out_scalars:g}'+'x0e + '+f'{out_vectors:g}'+'x1o'
+    irreps_latent = f'{latent_scalars:g}'+'x0e + '+f'{latent_vectors:g}'+'x1o'
+
+    return LitModel(irreps_in, irreps_latent, irreps_out, latent_layers, lr)

@@ -12,7 +12,7 @@ defaults = dict(
     latent_layers = 4,
     latent_scalars = 8,
     latent_vectors = 8,
-    epochs = 400,
+    epochs = 800,
 )
 
 wandb.init(config=defaults)
@@ -22,9 +22,9 @@ case = '../OpenFoam/cylinder2D_base'
 zones = ['internal','cylinder','inlet','outlet','top','bottom']
 data_fields = ['p','U']
 ts = torch.arange(3,6.001,step=0.05)
-train_loader, val_loader = build_dataset(case, zones, ts, config.rc, 
-                                         num_nodes=config.num_nodes, rollout=config.rollout,
-                                         data_fields=data_fields, train_split=0.9)
+train_loader, val_loader = build_dataloaders(case, zones, ts, config.rc, 
+                                            num_nodes=config.num_nodes, rollout=config.rollout,
+                                            data_fields=data_fields, train_split=0.9)
 model = build_model(len(zones)+1, 1,
                     config.latent_layers, config.latent_scalars, config.latent_vectors,
                     1, 1)
