@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 import wandb
-pl.seed_everything(42, workers=True)
+pl.seed_everything(42)
 
 ### Config ###
 config = dict(

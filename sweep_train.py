@@ -1,35 +1,38 @@
 import torch
-from train_funcs import *
+import os, glob, sys, argparse, yaml
+from types import SimpleNamespace
+sys.path.append('/home/opc/data/ml-cfd/FlowModel')
+import flowmodel.data.modules as datamodules
+from model_def import LitModel
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+from pytorch_lightning.plugins import DDPPlugin
 import wandb
+os.environ['WANDB_START_METHOD'] = 'thread'
+pl.seed_everything(42)
 
-### Model params ###
-defaults = dict(
-    num_nodes = 5000,
-    rollout = 1,
-    rc = .025,
-    latent_layers = 4,
-    latent_scalars = 8,
-    latent_vectors = 8,
-    epochs = 800,
-)
-
-wandb.init(config=defaults)
+### Config ###
+with open('config_kg.yaml','r') as fl:
+    defaults = yaml.load(fl,yaml.FullLoader)
+wandb.init(config=SimpleNamespace(**defaults))
 config = wandb.config
 
-case = '../OpenFoam/cylinder2D_base'
-zones = ['internal','cylinder','inlet','outlet','top','bottom']
-data_fields = ['p','U']
-ts = torch.arange(3,6.001,step=0.05)
-train_loader, val_loader = build_dataloaders(case, zones, ts, config.rc, 
-                                            num_nodes=config.num_nodes, rollout=config.rollout,
-                                            data_fields=data_fields, train_split=0.9)
-model = build_model(len(zones)+1, 1,
-                    config.latent_layers, config.latent_scalars, config.latent_vectors,
-                    1, 1)
+### Read data ###
+dm = getattr(datamodules,config.get('data_module'))(**config)
 
-wandb_logger = WandbLogger(project='flow-model', log_model=True)
-trainer = pl.Trainer(gpus=1, logger=wandb_logger, max_epochs=config.epochs)
+model = LitModel(
+    dm.irreps_io[0], dm.irreps_io[1],
+    **config
+)
+wandb_logger = WandbLogger(project=config.get('project'), log_model=True)
+lr_monitor = LearningRateMonitor()
+strategy = DDPPlugin(find_unused_parameters=False) if config.get('gpus') != 1 else None
+trainer = pl.Trainer(
+    gpus=config.get('gpus'), strategy=strategy, precision=16,
+    logger=wandb_logger, callbacks=[lr_monitor],
+    max_epochs=config.get('epochs'), log_every_n_steps=10
+)
 wandb_logger.watch(model)
-trainer.fit(model=model, train_dataloaders=train_loader, val_dataloaders=val_loader)
+trainer.fit(model, dm)
+trainer.test(model, datamodule=dm)

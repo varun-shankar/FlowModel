@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torch_geometric.data import Data as pygData
 from torch_geometric.utils import degree
 from e3nn.math import soft_one_hot_linspace
+from e3nn import o3
 from torch_geometric.loader import DataLoader
 import pytorch_lightning as pl
 
@@ -17,6 +18,16 @@ class Data(pygData):
             return 1
         else:
             return super().__cat_dim__(key, value, *args, **kwargs)
+
+    def rotate(self, rot):
+        irreps_in = o3.Irreps(self.irreps_io[0][0]).simplify()
+        irreps_out = o3.Irreps(self.irreps_io[0][1]).simplify()
+        D_in = irreps_in.D_from_matrix(rot).type_as(self.x)
+        D_out = irreps_out.D_from_matrix(rot).type_as(self.x)
+        self.x = self.x @ D_in.T
+        self.pos = self.pos @ rot.T
+        self.y = self.y @ D_out.T
+        return self
 
     def embed(self, num_basis=10):
         edge_src, edge_dst = self.edge_index
@@ -34,7 +45,7 @@ class OFDataModule(pl.LightningDataModule):
     def __init__(self, case, zones, ts, rc,
                        num_nodes=-1, 
                        rollout=1,
-                       data_fields=['p','U'],
+                       data_fields=['p','U'], data_irreps='0e+1o',
                        knn=False,
                        train_split=0.9, random_split=False,
                        test_ts=[], test_rollout=0,
@@ -47,6 +58,7 @@ class OFDataModule(pl.LightningDataModule):
         self.num_nodes = num_nodes
         self.rollout = rollout
         self.data_fields = data_fields
+        self.data_irreps = data_irreps
         self.knn = knn
         self.train_split = train_split
         self.random_split = random_split
@@ -71,6 +83,7 @@ class OFDataModule(pl.LightningDataModule):
         b1hot = F.one_hot(torch.cat(b,dim=0))
         fields = torch.cat(v,dim=1)
         features = torch.cat([b1hot.unsqueeze(0).repeat(len(all_ts),1,1),fields],dim=-1)
+        irreps_io = [f'{len(self.zones):g}'+'x0e+'+self.data_irreps,self.data_irreps]
 
         # Generate graph
         if self.knn:
@@ -80,7 +93,7 @@ class OFDataModule(pl.LightningDataModule):
         print('Avg neighbors = ', edge_index.shape[1]/pos.shape[0])
 
         ### Generate dataset ###
-        dataset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], 
+        dataset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], irreps_io=irreps_io,
                         dts=torch.diff(all_ts[i:i+1+self.rollout]),
                         pos=pos, edge_index=edge_index, rc=self.rc) for i in range(len(self.ts)-self.rollout)]
         if self.random_split:
@@ -89,11 +102,11 @@ class OFDataModule(pl.LightningDataModule):
         self.val_data = dataset[int((len(dataset)+1)*self.train_split):]
 
         # Test
-        testset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], 
+        testset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], irreps_io=irreps_io,
                         dts=torch.diff(all_ts[i:i+1+self.rollout]),
                         pos=pos, edge_index=edge_index, rc=self.rc) for i in range(
                             len(self.ts),len(self.ts)+len(self.test_ts)-self.rollout)]
-        testset_rollout = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.test_rollout,:,:], 
+        testset_rollout = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.test_rollout,:,:], irreps_io=irreps_io,
                         dts=torch.diff(all_ts[i:i+1+self.test_rollout]),
                         pos=pos, edge_index=edge_index, rc=self.rc) for i in range(
                             len(self.ts),len(self.ts)+len(self.test_ts)-self.test_rollout)]
