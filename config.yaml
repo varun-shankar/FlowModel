@@ -1,0 +1,32 @@
+# Init #
+project: 'flow-model'
+job_type: 'train'
+# load_id: 'dy6bdhyy'
+
+# Data #
+data_module: 'OFDataModule'
+case: '../OpenFoam/cylinder2D_base'
+zones: ['internal','cylinder','inlet','outlet','top','bottom']
+node_basis: 6
+num_nodes: 5000
+dt: .01
+ts: [3,6]
+test_ts: [6,6.5]
+rollout: 1
+test_rollout: 50
+data_aug: False
+
+# Model #
+rc: .025
+latent_layers: 4
+latent_scalars: 16
+latent_vectors: 16
+latent_tensors: 0
+model_type: 'reservoir'
+
+# Training #
+batch_size: 1
+lr: 0.05
+epochs: 500
+gpus: -1
+noise_var: 0.00088

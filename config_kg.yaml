@@ -1,0 +1,28 @@
+# Init #
+project: 'flow-model'
+job_type: 'train'
+# load_id: 'vhjpmh1r'
+
+# Data #
+data_module: 'KaggleDataModule'
+turb_model: 'kepsilon'
+geometry: ['PHLL']
+num_nodes: 8000
+node_basis: 1
+data_aug: False
+
+# Model #
+rc: .1
+#[.01, .12]
+#,.03,.002]
+latent_layers: 2
+latent_scalars: 20
+latent_vectors: 20
+latent_tensors: 2
+model_type: 'equivariant'
+
+# Training #
+batch_size: 1
+lr: 0.09
+epochs: 500
+gpus: 1

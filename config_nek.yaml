@@ -1,0 +1,31 @@
+# Init #
+project: 'flow-model'
+job_type: 'train'
+# load_id: '195hoocr'
+
+# Data #
+data_module: 'NekDataModule'
+# num_nodes: 5000
+# prefetched: False
+node_basis: 0
+ts: 50
+# train_split: 0.5
+test_ts: 50
+rollout: 1
+test_rollout: 49
+data_aug: True
+
+# Model #
+rc: .25
+latent_layers: 4
+latent_scalars: 16
+latent_vectors: 16
+latent_tensors: 0
+model_type: 'equivariant'
+
+# Training #
+batch_size: 1
+lr: 0.08
+epochs: 100
+gpus: -1
+noise_var: 0.0

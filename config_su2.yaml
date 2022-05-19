@@ -1,0 +1,26 @@
+# Init #
+project: 'flow-model'
+job_type: 'train'
+# load_id: 'dy6bdhyy'
+
+# Data #
+data_module: 'SU2DataModule'
+markers: ['bump','platform','inlet','outlet','top','ground']
+node_basis: 7
+num_data: 200
+num_nodes: -1
+data_aug: False
+
+# Model #
+rc: .1
+latent_layers: 4
+latent_scalars: 16
+latent_vectors: 16
+latent_tensors: 0
+model_type: 'equivariant'
+
+# Training #
+batch_size: 1
+lr: 0.05
+epochs: 200
+gpus: -1
