@@ -1,0 +1,7 @@
+.vscode/
+__pycache__/
+lightning_logs/
+wandb/
+checkpoints/
+flow-model/
+*.pt

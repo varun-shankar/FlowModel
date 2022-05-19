@@ -13,7 +13,7 @@ os.environ['WANDB_START_METHOD'] = 'thread'
 pl.seed_everything(42)
 
 ### Config ###
-with open('config_kg.yaml','r') as fl:
+with open('config.yaml','r') as fl:
     defaults = yaml.load(fl,yaml.FullLoader)
 wandb.init(config=SimpleNamespace(**defaults))
 config = wandb.config

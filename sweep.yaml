@@ -3,21 +3,23 @@ project: flow-model
 method: bayes
 metric:
   goal: minimize
-  name: test_loss
+  name: test_rollout_loss
 parameters:
   latent_scalars:
     values:
-      - 4
-      - 8
       - 16
+      - 20
+      - 24
   latent_vectors:
     values:
-      - 4
-      - 8
       - 16
-  latent_tensors:
-    min: 0
-    max: 4 
+      - 20
+      - 24
   latent_layers:
     min: 2
     max: 8 
+  noise_var:
+    values:
+      - 0.0006
+      - 0.0008
+      - 0.001

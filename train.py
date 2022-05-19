@@ -31,7 +31,7 @@ dm = getattr(datamodules,config.get('data_module'))(**config)
 ### Lightning setup ###
 if config.get('job_type') == 'train':
     model = LitModel(
-        dm.irreps_io[0], dm.irreps_io[1],
+        dm.irreps_io[0], dm.irreps_io[1], dm.loss_fn,
         **config
     )
     ckpt = None
@@ -73,8 +73,10 @@ if config.get('job_type') != 'eval':
         resume_from_checkpoint=ckpt#, accumulate_grad_batches=2
     )
     trainer.fit(model, dm)
+    if int(os.environ.get('LOCAL_RANK', 0)) == 0:
+        trainer = pl.Trainer(gpus=0, logger=wandb_logger, limit_test_batches=10)
+        trainer.test(model, datamodule=dm)
 else:
     dm.setup('fit')
-    trainer = pl.Trainer(gpus=1)
-
-trainer.test(model, datamodule=dm)
+    trainer = pl.Trainer(gpus=config.get('gpus'), logger=wandb_logger, limit_test_batches=5)
+    trainer.test(model, datamodule=dm)
