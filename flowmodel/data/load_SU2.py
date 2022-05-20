@@ -77,3 +77,15 @@ def load_SU2(meshfile, sensfile, flowfile, markers, fields):
     s = torch.tensor(sens.point_data['Sensitivity']).float()
 
     return p, b, v, s
+
+def load_SU2_test(meshfile, markers):
+    p = torch.tensor(read_mesh_file(meshfile)['points']).float()
+    p[:,-1] = 0
+    b = torch.zeros(p.shape[0])
+
+    i = len(markers)
+    for m in reversed(markers):
+        b[get_marker_info_from_file(meshfile,m)['id']] = i
+        i -= 1
+
+    return p, b

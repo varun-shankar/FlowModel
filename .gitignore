@@ -5,3 +5,8 @@ wandb/
 checkpoints/
 flow-model/
 *.pt
+*.vtk
+*.su2
+*.csv
+*.dat
+*.cfg

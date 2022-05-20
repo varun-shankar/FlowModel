@@ -110,7 +110,7 @@ class LitModel(pl.LightningModule):
 
             rot_loss = self.loss_fn(y_hat_rot, rot_data)
             # rot_loss = self.metric(io.CartesianTensor('ij=ji').to_cartesian(y_hat_rot), io.CartesianTensor('ij=ji').to_cartesian(rot_data.y))
-            eq_loss = torch.nn.functional.mse(y_hat @ D_out.T, y_hat_rot)
+            eq_loss = torch.nn.functional.mse_loss(y_hat @ D_out.T, y_hat_rot)
             self.log('test_rot_loss', rot_loss, batch_size=data.num_graphs,
                 add_dataloader_idx=False)
             self.log('eq_loss', eq_loss, batch_size=data.num_graphs,

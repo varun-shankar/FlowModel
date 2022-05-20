@@ -385,7 +385,8 @@ class SU2DataModule(pl.LightningDataModule):
                        num_data=200, num_test=10, num_nodes=-1, 
                        data_fields=['Pressure','Velocity'], data_irreps=['1o','0e+2x1o'],
                        knn=False,
-                       train_split=0.9, random_split=False,
+                       alpha=0.5,
+                       train_split=0.9, random_split=True,
                        shuffle=True, batch_size=1, **kwargs):
         super().__init__()
         self.markers = markers
@@ -398,6 +399,7 @@ class SU2DataModule(pl.LightningDataModule):
         self.data_fields = data_fields
         self.data_irreps = data_irreps
         self.knn = knn
+        self.alpha = alpha
         self.train_split = train_split
         self.random_split = random_split
         self.shuffle = shuffle
@@ -499,9 +501,9 @@ class SU2DataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return DataLoader(self.test_data, batch_size=self.batch_size, num_workers=8)
 
-    def loss_fn(self, y_hat, data, α=0.8):
+    def loss_fn(self, y_hat, data):
         l1 = F.mse_loss(y_hat[:,:,:-3], data.y[:,:,:-3])
         l2 = F.mse_loss(y_hat[:,data.emb_node[:,1].bool(),-3:], 
                   data.y[:,data.emb_node[:,1].bool(),-3:])
 
-        return (1-α)*l1 + α*l2
+        return (1-self.alpha)*l1 + self.alpha*l2

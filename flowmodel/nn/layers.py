@@ -199,7 +199,7 @@ class Encoder(torch.nn.Module):
     def __init__(self, irreps_in, irreps_latent, model_type='equivariant'):
         super(Encoder, self).__init__()
 
-        if model_type=='equivariant' or 'reservoir':
+        if model_type=='equivariant' or model_type=='reservoir':
             self.node_enc = torch.nn.Sequential(
                 o3GatedLinear(irreps_in, irreps_latent),
                 o3.Linear(irreps_latent, irreps_latent)#, LayerNorm()
@@ -230,7 +230,7 @@ class Decoder(torch.nn.Module):
     def __init__(self, irreps_latent, irreps_out, model_type='equivariant'):
         super(Decoder, self).__init__()
 
-        if model_type=='equivariant' or 'reservoir':
+        if model_type=='equivariant' or model_type=='reservoir':
             self.node_dec = torch.nn.Sequential(
                 o3GatedLinear(irreps_latent, irreps_latent),
                 o3.Linear(irreps_latent, irreps_out)

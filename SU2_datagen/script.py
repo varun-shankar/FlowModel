@@ -1,10 +1,44 @@
 import SU2
-import copy
+import copy, glob, os, sys, time
 import pandas as pd
 import geometry
 import torch
 import meshio
 import shutil
+sys.path.append('/home/opc/data/ml-cfd/FlowModel')
+from model_def import LitModel
+import flowmodel.data.load_SU2 as load
+from flowmodel.data.modules import Data
+import torch.nn.functional as F
+from torch_cluster import knn_graph, radius_graph
+
+load_id = None#'3a0tipkk'
+if load_id is None:
+    ckpt = max(glob.glob('../checkpoints/*'), key=os.path.getctime)
+else:
+    ckpt = max(glob.glob('../checkpoints/run-'+load_id+'*'), key=os.path.getctime)
+
+model = LitModel.load_from_checkpoint(ckpt).to('cuda:0')
+def gen_data(rc, num_nodes, meshfile):
+    p, b = load.load_SU2_test(meshfile, ['bump','platform','inlet','outlet','top','ground'])
+    # Sample internal nodes
+    if num_nodes != -1:
+        n_bounds = sum(b!=0)
+        torch.manual_seed(42)
+        idx = torch.cat([(b!=0).nonzero().flatten(),
+            (b==0).nonzero().flatten()[
+                torch.randperm(sum(b==0))[:num_nodes-n_bounds]]],dim=0)
+        p = p[idx,:]; b = b[idx]
+
+    pos = p
+    b1hot = F.one_hot(b.long()).float()
+    edge_index = radius_graph(pos, r=rc, max_num_neighbors=32)
+
+    data = Data(x=p-p.mean(dim=0), y=torch.zeros(1,1,1), irreps_io=[['1o','0e+2x1o']],
+                dts=torch.ones(1), emb_node=b1hot,
+                pos=pos, edge_index=edge_index, rc=rc)
+    return data.to('cuda:0')
+
 
 config_filename = 'adjoint.cfg'
 
@@ -40,7 +74,7 @@ def run_direct(SU2_config):
     #Get Functions
     drag = SU2.eval.func('DRAG',konfig, state)
     
-    return state
+    return state, drag
 
 def run_adjoint(SU2_config, state):
 
@@ -64,25 +98,47 @@ def run_adjoint(SU2_config, state):
 
     return adjoint_data
 
+rc = 0.5
+num_nodes = 4000
+learning_rate = 0.1
+num_iters = 50
+inner_iters = 10
+drags = []
+dvs = []
+times = []
+# bump_center = torch.Tensor([5.5])
+bump_center = torch.FloatTensor(1).uniform_(3, 5)
+bump_rad = 0.2
+dv = bump_center.clone().detach().requires_grad_(True)
 
-lr = 1
-iter = 0
-for j in range(10):
-    bump_center = torch.FloatTensor(1).uniform_(3, 5)
-    bump_rad = 0.2
-    dv = bump_center.clone().detach().requires_grad_(True)
+tic = time.perf_counter()
+for i in range(num_iters):
+    geometry.build_shape(dv,bump_rad,64,.3)
+    data = gen_data(rc, num_nodes, 'mesh.su2')
+    adjoint_data = model(data)[0,data.emb_node[:,1].bool(),-3:-1].cpu()
 
-    for i in range(1):
-        geometry.build_shape(dv,bump_rad,64,.3)
-        state = run_direct(SU2_config)
-        adjoint_data = run_adjoint(SU2_config, state)
-        pos = geometry.get_bump_pos(dv,bump_rad,64)
-        pos.backward(torch.tensor(adjoint_data))
-        print(dv.grad)
-        with torch.no_grad():
-            dv -= dv.grad * lr
-            dv.grad.zero_()
-        shutil.move('flow.vtk',f'test_data/flow_{iter}.vtk')
-        shutil.move('surface_sens.vtk',f'test_data/sens_{iter}.vtk')
-        shutil.move('mesh.su2',f'test_data/mesh_{iter}.su2')
-        iter += 1
+    lr = learning_rate
+    drag = 0
+    if i%inner_iters==0 or i==num_iters-1:
+        state, drag = run_direct(SU2_config)
+        shutil.move('flow.vtk',f'test_data/flow_{i}.vtk')
+        if (i>0 and i!=num_iters-1 and drag>0.9*drags[-inner_iters]) or i==num_iters-2:
+            adjoint_data = torch.tensor(run_adjoint(SU2_config, state))
+            lr = 1
+
+    pos = geometry.get_bump_pos(dv,bump_rad,64)
+    pos.backward(adjoint_data.clone().detach())
+    print('grad: ', dv.grad.item())
+    drags.append(drag)
+    dvs.append(dv.item())
+    times.append(time.perf_counter()-tic)
+    
+    with torch.no_grad():
+        dv -= dv.grad * lr
+        dv.grad.zero_()
+    print('dv  : ', dv.item())
+
+    shutil.move('mesh.su2',f'test_data/mesh_{i}.su2')
+    # shutil.move('surface_sens.vtk',f'test_data/sens_{i}.vtk')
+
+print(torch.tensor([drags,dvs,times]).T)
