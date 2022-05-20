@@ -66,11 +66,14 @@ def run_adjoint(SU2_config, state):
 
 rc = 0.5
 num_nodes = 64
-learning_rate = 0.1 # play with this
-num_iters = 50
+learning_rate = 0.3 # play with this
+num_iters = 5
+
+# logging
+dvs   = [] # design variable
 drags = []
-dvs = []            # design variable
-times = []
+grads = []
+times = [] # rolling wall time
 
 ## experiment with these initial conditions
 # bump_center = torch.Tensor([5.5])
@@ -83,27 +86,25 @@ bump_rad = 0.2
 
 dv = bc1.clone().detach().requires_grad_(True)
 
-num_iters = 1
+# iterate over learning rate
 
 tic = time.perf_counter()
 for i in range(num_iters):
-    # build mesh
-    print("#================================================================#")
-    print("Iteration ", i)
-    print("#================================================================#")
+    it = i + 1
+    print("#======================================================#")
+    print("Iteration ", it)
+    print("#======================================================#")
 
     print("#================================#")
     print("Building Geometry ")
     print("#================================#")
     geometry.build_shape(dv,bump_rad,num_nodes,.3)
 
-    # SU2 fwd
     print("#================================#")
     print("SU2 Forward Solve ")
     print("#================================#")
     state, drag = run_direct(SU2_config)
 
-    # SU2 adj
     print("#================================#")
     print("SU2 Adjoint Solve ")
     print("#================================#")
@@ -117,21 +118,24 @@ for i in range(num_iters):
 
     with torch.no_grad():
         dv -= dv.grad * learning_rate
-        dv.grad.zero_()
 
-    print('grad: ', dv.grad.item())
+    # append logs
     drags.append(drag)
     dvs.append(dv.item())
     tt = time.perf_counter() - tic
     times.append(tt)
-    print("#================================================================#")
-    print("Completed iteration ", i)
-    print('Bump Center: ', dv.item())
-    print('Drag: ', drag)
-    print('Wall Time: ', tt)
-    print("#================================================================#")
+    print("#======================================================#")
+    print("Completed iteration:", it)
+    print('Bump Center:', dv.item())
+    print('Gradient: ', dv.grad.item())
+    print('Drag:', drag)
+    print('Wall Time:', tt)
+    print("#======================================================#")
 
-    shutil.move('mesh.su2',f'test_data/mesh_{i}.su2')
-    shutil.move('surface_sens.vtk',f'test_data/sens_{i}.vtk')
+    with torch.no_grad():
+        dv.grad.zero_()
+
+    ##shutil.move('mesh.su2',f'test_data/mesh_{i}.su2')
+    #shutil.move('surface_sens.vtk',f'test_data/sens_{i}.vtk')
 
 print(torch.tensor([drags,dvs,times]).T)

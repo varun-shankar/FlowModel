@@ -10,3 +10,5 @@ flow-model/
 *.csv
 *.dat
 *.cfg
+log*.out
+log*.err

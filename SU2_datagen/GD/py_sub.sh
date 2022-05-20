@@ -2,7 +2,7 @@
 
 #SBATCH -n 16 # cores
 #SBATCH -N 1  # nodes
-#SBATCH -t 0-00:10:00 # max 7 days
+#SBATCH -t 0-01:00:00 # max 7 days
 #SBATCH -p cpu
 #SBATCH -A venkvis
 #SBATCH --mem-per-cpu=2280 # Memory pool for all cores in MB
