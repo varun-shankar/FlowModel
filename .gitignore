@@ -12,3 +12,5 @@ flow-model/
 *.cfg
 log*.out
 log*.err
+.*.swp
+.*.swo

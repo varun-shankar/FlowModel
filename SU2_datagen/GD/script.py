@@ -70,9 +70,8 @@ learning_rate = 0.3 # play with this
 num_iters = 5
 
 # logging
-dvs   = [] # design variable
+dvs   = [] # design variable = bump_center
 drags = []
-grads = []
 times = [] # rolling wall time
 
 ## experiment with these initial conditions
@@ -84,9 +83,15 @@ bc3 = torch.Tensor([5.0])
 
 bump_rad = 0.2
 
+# iterate over learning rate, and bump center
+lr = learning_rate
 dv = bc1.clone().detach().requires_grad_(True)
 
-# iterate over learning rate
+# add initial state to log
+dvs.append(dv.item())
+state, drag = run_direct(SU2_config)
+drags.append(drag)
+times.append(0.0)
 
 tic = time.perf_counter()
 for i in range(num_iters):
@@ -117,13 +122,8 @@ for i in range(num_iters):
     pos.backward(adjoint_data.clone().detach())
 
     with torch.no_grad():
-        dv -= dv.grad * learning_rate
+        dv -= dv.grad * lr
 
-    # append logs
-    drags.append(drag)
-    dvs.append(dv.item())
-    tt = time.perf_counter() - tic
-    times.append(tt)
     print("#======================================================#")
     print("Completed iteration:", it)
     print('Bump Center:', dv.item())
@@ -132,10 +132,20 @@ for i in range(num_iters):
     print('Wall Time:', tt)
     print("#======================================================#")
 
+    # append logs
+    dvs.append(dv.item())
+    drags.append(drag)
+    tt = time.perf_counter() - tic
+    times.append(tt)
+
     with torch.no_grad():
         dv.grad.zero_()
 
     ##shutil.move('mesh.su2',f'test_data/mesh_{i}.su2')
     #shutil.move('surface_sens.vtk',f'test_data/sens_{i}.vtk')
 
-print(torch.tensor([drags,dvs,times]).T)
+# save logs
+name = "log_GD_lr_" + str(lr) + "bump_init_" + str(bc1.item())
+np.save(name, [dvs, drags, times])
+
+#
