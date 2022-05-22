@@ -80,9 +80,9 @@ bc3 = torch.Tensor([5.0])
 nIC  = 1
 dv = bc1.clone().detach().requires_grad_(True)
 
-nLR  = 10
 nOpt = 20
-learning_rate = np.linspace(0.1,1,num=nLR)
+nLR  = 5
+learning_rate = 0.1 * 10**-np.linspace(0, nLR-1,num=nLR)
 
 for iLR in range(nLR):
     lr = learning_rate[iLR]
@@ -132,6 +132,7 @@ for iLR in range(nLR):
 
         print("#================================#")
         print("Completed Iteration:", it)
+        print("Learning rate:", lr)
         print('Bump Center:', dv.item())
         print('Gradient: ', dv.grad.item())
         print('Drag:', drag)
