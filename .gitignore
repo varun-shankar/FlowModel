@@ -14,3 +14,4 @@ flow-model/
 .*.swo
 #log*.out
 #log*.err
+.DS_STORE
