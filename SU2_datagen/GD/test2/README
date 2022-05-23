@@ -1,0 +1,2 @@
+learning rate 10**-1, 10**-2,..., 10**-5
+did not update dv after every sweep ://
