@@ -69,32 +69,26 @@ rc = 0.5
 num_nodes = 64
 bump_rad = 0.2
 
-## experiment with these initial conditions
-# bump_center = torch.Tensor([5.5])
-bump_center = torch.FloatTensor(1).uniform_(3, 5)
+#bc4 = torch.FloatTensor(1).uniform_(3, 5)
 bc1 = torch.Tensor([3.0])
 bc2 = torch.Tensor([4.0])
 bc3 = torch.Tensor([5.0])
 
-# iterate over initial positions
-nIC  = 1
-dv = bc1.clone().detach().requires_grad_(True)
-
+nIC  = 3
 nOpt = 20
-nLR  = 4
-learning_rate = [0.2, 0.4, 0.6, 0.8]
+bump_center = [bc1, bc2, bc3]
+learning_rate = 0.5
 
-for iLR in range(nLR):
-    lr = learning_rate[iLR]
-
+for iIC in range(nIC):
+    bc = bump_center[iIC]
+    dv = bc.clone().detach().requires_grad_(True)
+    
     # logging
     tic = time.perf_counter()
     dvs   = [] # design variable = bump_center
     drags = []
     times = [] # rolling wall time
 
-    dv = bc1.clone().detach().requires_grad_(True)
-    
     # optimization loop
     for i in range(nOpt):
         it = i + 1
@@ -131,7 +125,7 @@ for iLR in range(nLR):
 
         print("#================================#")
         print("Completed Iteration:", it)
-        print("Learning rate:", lr)
+        print("Learning rate:", learning_rate)
         print('Bump Center:', dv.item())
         print('Gradient: ', dv.grad.item())
         print('Drag:', drag)
@@ -139,7 +133,7 @@ for iLR in range(nLR):
         print("#================================#")
 
         with torch.no_grad():
-            dv -= dv.grad * lr
+            dv -= dv.grad * learning_rate
 
         with torch.no_grad():
             dv.grad.zero_()
@@ -148,7 +142,7 @@ for iLR in range(nLR):
         #shutil.move('surface_sens.vtk',f'test_data/sens_{i}.vtk')
 
     # save logs
-    name = "log_GD_lr_" + str(iLR) #+ "_bump_ic_" + str(iIC)
+    name = "log_bump_IC_" + str(iIC)
     np.save(name, [dvs, drags, times])
     print("Saving log file,", name, '.npy')
 
