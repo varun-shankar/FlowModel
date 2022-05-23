@@ -58,9 +58,7 @@ def loss(dv):
     return -drag
 
 domain = [[3.0, 5.0]]
-maxiters = 2 # 100
-
-# TODO - get time after each iteration
+maxiters = 20
 
 tic = time.perf_counter()
 loss_min, dv_min, history = minimise_function(loss, domain, maxiters)
