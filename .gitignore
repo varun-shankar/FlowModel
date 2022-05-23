@@ -5,12 +5,12 @@ wandb/
 checkpoints/
 flow-model/
 *.pt
+*.dat
 *.vtk
 *.su2
 *.csv
-*.dat
-*.cfg
-log*.out
-log*.err
+*config*
 .*.swp
 .*.swo
+#log*.out
+#log*.err
