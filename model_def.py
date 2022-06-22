@@ -1,7 +1,7 @@
 import torch
 import copy, sys
 sys.path.append('/home/opc/data/ml-cfd/FlowModel')
-from flowmodel.nn.layers import build_model
+from flowmodel.nn.build_model import build_model
 from torchmetrics import MeanSquaredError
 from torch_scatter import scatter
 from e3nn import o3, nn, io
@@ -18,7 +18,7 @@ class LitModel(pl.LightningModule):
         self.save_hyperparameters()
         
         self.model_type = model_type
-        self.enc, self.f, self.dec = build_model(model_type, 
+        self.node = build_model(model_type, 
             irreps_in, irreps_out,
             latent_layers, latent_scalars, latent_vectors, latent_tensors, **kwargs)
         self.loss_fn = MeanSquaredError() if loss_fn is None else loss_fn
@@ -27,47 +27,19 @@ class LitModel(pl.LightningModule):
         self.noise_var = noise_var
         self.data_aug = data_aug
 
-    # def forward(self, data):
-
-    #     _ = data.rotate(o3.rand_matrix().type_as(data.x)) if self.model_type != 'equivariant' and self.training else 0
-    #     # _ = data.rotate(o3.rand_matrix().type_as(data.x)) if self.training else 0
-    #     data.embed()
-    #     h = data.x
-    #     h = self.enc(h)
-    #     if self.model_type == 'equivariant':
-    #         h = h + self.f.layers[0].irreps_input.randn(h.shape[0],-1).type_as(h)*(self.noise_var**.5) if self.training else h
-    #     else:
-    #         h = h + torch.randn(h.shape).type_as(h)*(self.noise_var**.5) if self.training else h
-    #     hs = []
-    #     for i in range(data.y.shape[0]):
-    #         h = h + self.f(h, data)*data.dts[i]
-    #         hs.append(h)
-    #     hs = torch.stack(hs)
-    #     hs = self.dec(hs)
-
-    #     return hs
     def forward(self, data):
 
         _ = data.rotate(o3.rand_matrix().type_as(data.x)) if self.data_aug and self.training else 0
 
         xi = data.x
-        yhs = []
-        for i in range(data.y.shape[0]):
-            if self.training:
-                xi = xi + o3.Irreps(data.irreps_io[0][0]).randn(xi.shape[0],-1).type_as(xi) * \
-                (self.noise_var)**.5
-                # xi[:,-1] *= 0
-            data.hn = xi
-            self.enc(data)
-            self.f(data)
-            self.dec(data)
-            # xi = xi + data.hn*data.dts[i]
-            xi = data.hn
-            yhs.append(xi)
+        if self.training:
+            xi = xi + o3.Irreps(data.irreps_io[0][0]).randn(xi.shape[0],-1).type_as(xi) * \
+            (self.noise_var)**.5
+        
+        self.node.dudt.data = data
+        t, yhs = self.node(xi, data.ts)
 
-        yhs = torch.stack(yhs)
-
-        return yhs
+        return yhs[1:,:,:]
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=self.lr)
@@ -129,31 +101,3 @@ class LitModel(pl.LightningModule):
                 torch.save((data,y_hat),'data_rollout.pt')
 
         return loss
-
-
-# import sys, copy
-# from e3nn import o3
-# sys.argv = ["train.py", "--config", "config.yaml"]
-# exec(open('train.py').read())
-# dm.setup('fit')
-
-# data = copy.deepcopy(dm.test_data[0]); data.irreps_io=[data.irreps_io]
-# _=model.eval();_=model.cpu();_=data.cpu();
-# rot_data = copy.deepcopy(data)
-# # rot = o3.rand_matrix()
-# rot = rot.type_as(data.x)
-# rot_data, D_out = rot_data.rotate(rot)
-# D_out = D_out.type_as(data.x)
-# with torch.no_grad(): y_hat=model(data); y_hat_rot=model(rot_data)
-
-# datag = copy.deepcopy(dm.test_data[0]); datag.irreps_io=[datag.irreps_io]
-# _=model.eval();_=model.cuda();_=datag.cuda();
-# rot_datag = copy.deepcopy(datag)
-# # rot = o3.rand_matrix()
-# rotg = rot.type_as(datag.x)
-# rot_datag, D_outg = rot_datag.rotate(rotg)
-# D_outg = D_outg.type_as(datag.x)
-# with torch.no_grad(): y_hatg=model(datag); y_hat_rotg=model(rot_datag)
-
-# torch.nn.functional.mse_loss(y_hat@D_out.T,y_hat_rot)
-# torch.nn.functional.mse_loss(y_hatg@D_outg.T,y_hat_rotg)

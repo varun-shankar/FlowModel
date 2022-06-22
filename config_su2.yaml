@@ -8,12 +8,12 @@ data_module: 'SU2DataModule'
 markers: ['bump','platform','inlet','outlet','top','ground']
 node_basis: 7
 num_data: 300
-num_nodes: 5000
+num_nodes: 2000
 data_aug: False
 
 # Model #
-rc: .5
-latent_layers: 4
+rc: .7
+latent_layers: 3
 latent_scalars: 16
 latent_vectors: 16
 latent_tensors: 0
@@ -22,6 +22,6 @@ model_type: 'equivariant'
 # Training #
 alpha: 1.
 batch_size: 1
-lr: 0.01
-epochs: 100
+lr: 0.008
+epochs: 150
 gpus: -1

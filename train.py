@@ -10,7 +10,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.plugins import DDPPlugin
 import wandb
-os.environ['WANDB_START_METHOD'] = 'thread'
+os.environ["WANDB_MODE"] = "offline"
 pl.seed_everything(42)
 
 def parse_command_line():
@@ -59,13 +59,14 @@ else:
 
 ### Train ###
 wandb_logger = WandbLogger(project=config.get('project'), log_model='all', 
-    job_type=config.get('job_type'), id=run_id, config=SimpleNamespace(**config))
+    job_type=config.get('job_type'), id=run_id, settings=wandb.Settings(start_method="fork"), 
+    config=SimpleNamespace(**config))
 if config.get('job_type') != 'eval':
     wandb_logger.watch(model)
     checkpoint_callback = ModelCheckpoint(monitor=config.get('monitor','val_loss'), 
         dirpath='checkpoints/', filename='run-'+run_id+'-best')
     lr_monitor = LearningRateMonitor()
-    strategy = DDPPlugin(find_unused_parameters=False) if config.get('gpus') != 1 else None
+    strategy = 'ddp_find_unused_parameters_false' if config.get('gpus') != 1 else None
     trainer = pl.Trainer(
         gpus=config.get('gpus'), strategy=strategy, precision=16,
         logger=wandb_logger, callbacks=[checkpoint_callback,lr_monitor],
@@ -74,7 +75,7 @@ if config.get('job_type') != 'eval':
     )
     trainer.fit(model, dm)
     if int(os.environ.get('LOCAL_RANK', 0)) == 0:
-        trainer = pl.Trainer(gpus=0, logger=wandb_logger, limit_test_batches=10)
+        trainer = pl.Trainer(gpus=0, logger=wandb_logger, limit_test_batches=5)
         trainer.test(model, datamodule=dm)
 else:
     dm.setup('fit')

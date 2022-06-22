@@ -121,7 +121,7 @@ class OFDataModule(pl.LightningDataModule):
 
             ### Generate dataset ###
             dataset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], irreps_io=self.irreps_io,
-                            dts=torch.diff(all_ts[i:i+1+self.rollout]), emb_node=b1hot,
+                            ts=(all_ts[i:i+1+self.rollout]), emb_node=b1hot,
                             pos=pos, edge_index=edge_index, rc=self.rc) for i in range(len(self.ts)-self.rollout)]
             if self.random_split:
                 random.shuffle(dataset)
@@ -130,11 +130,11 @@ class OFDataModule(pl.LightningDataModule):
 
             # Test
             testset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], irreps_io=self.irreps_io,
-                            dts=torch.diff(all_ts[i:i+1+self.rollout]), emb_node=b1hot,
+                            ts=(all_ts[i:i+1+self.rollout]), emb_node=b1hot,
                             pos=pos, edge_index=edge_index, rc=self.rc) for i in range(
                                 len(self.ts),len(self.ts)+len(self.test_ts)-self.rollout)]
             testset_rollout = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.test_rollout,:,:], irreps_io=self.irreps_io,
-                            dts=torch.diff(all_ts[i:i+1+self.test_rollout]), emb_node=b1hot,
+                            ts=(all_ts[i:i+1+self.test_rollout]), emb_node=b1hot,
                             pos=pos, edge_index=edge_index, rc=self.rc) for i in range(
                                 len(self.ts),len(self.ts)+len(self.test_ts)-self.test_rollout)]
             self.test_data = testset
@@ -149,6 +149,9 @@ class OFDataModule(pl.LightningDataModule):
     def test_dataloader(self):
         return [DataLoader(self.test_data, batch_size=self.batch_size, num_workers=8),
                 DataLoader(self.test_data_rollout, num_workers=8)]
+
+    def loss_fn(self, y_hat, data):
+        return F.mse_loss(y_hat, data.y)
 
 
 ###### Kaggle #######################################################################################

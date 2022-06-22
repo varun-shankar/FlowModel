@@ -18,15 +18,17 @@ data_aug: False
 
 # Model #
 rc: .025
-latent_layers: 4
+latent_layers: 10
 latent_scalars: 16
 latent_vectors: 16
 latent_tensors: 0
-model_type: 'reservoir'
+model_type: 'equivariant'
+solver: 'rk4'
+sensitivity: 'interpolated_adjoint'
 
 # Training #
 batch_size: 1
 lr: 0.05
-epochs: 500
+epochs: 100
 gpus: -1
-noise_var: 0.00088
+noise_var: 0.001
