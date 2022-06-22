@@ -58,18 +58,18 @@ def loss(dv):
     return -drag
 
 domain = [[3.0, 5.0]]
-maxiters = 2 # 100
-
-# TODO - get time after each iteration
+maxiters = 50
 
 tic = time.perf_counter()
 loss_min, dv_min, history = minimise_function(loss, domain, maxiters)
-tt = tic - time.perf_counter()
+tt = time.perf_counter() - tic
 
-print("minimum loss", loss_min)
-print("bump center", dv_min)
-print("time", tt)
-
+print("#===================================#")
+print("Minimum Drag", -loss_min)
+print("Bump Center", dv_min)
+print("Total Time", tt)
+print("History", history)
+print("#===================================#")
 np.save("hist", history)
 
 print("cya")

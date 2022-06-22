@@ -81,8 +81,8 @@ nIC  = 1
 dv = bc1.clone().detach().requires_grad_(True)
 
 nOpt = 20
-nLR  = 5
-learning_rate = 0.1 * 10**-np.linspace(0, nLR-1,num=nLR)
+nLR  = 4
+learning_rate = [0.2, 0.4, 0.6, 0.8]
 
 for iLR in range(nLR):
     lr = learning_rate[iLR]
@@ -92,6 +92,8 @@ for iLR in range(nLR):
     dvs   = [] # design variable = bump_center
     drags = []
     times = [] # rolling wall time
+
+    dv = bc1.clone().detach().requires_grad_(True)
     
     # optimization loop
     for i in range(nOpt):
@@ -121,9 +123,6 @@ for iLR in range(nLR):
         pos = geometry.get_bump_pos(dv,bump_rad,num_nodes)
         pos.backward(adjoint_data.clone().detach())
 
-        with torch.no_grad():
-            dv -= dv.grad * lr
-    
         # append logs
         dvs.append(dv.item())
         drags.append(drag)
@@ -138,6 +137,9 @@ for iLR in range(nLR):
         print('Drag:', drag)
         print('Wall Time:', tt)
         print("#================================#")
+
+        with torch.no_grad():
+            dv -= dv.grad * lr
 
         with torch.no_grad():
             dv.grad.zero_()
