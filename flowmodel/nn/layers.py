@@ -1,7 +1,7 @@
 import torch
 from torch_scatter import scatter
 from e3nn import o3, nn
-from torch.nn import ReLU, Tanh, Linear
+from torch.nn import ReLU, Tanh, SiLU, Sigmoid, Linear
 from .utils import *
 from torch_geometric.nn import GCNConv, EdgeConv
 from torchdyn.core import NeuralODE
@@ -38,9 +38,9 @@ class Eq_NLMP(torch.nn.Module):
         return scatter(edge_ftr, edge_dst, dim=0, dim_size=data.num_nodes)
 
 class Eq_NLMP2(torch.nn.Module):
-    def __init__(self, irreps_input, irreps_output, act=torch.tanh,
+    def __init__(self, irreps_input, irreps_output, act=Tanh(),
                        irreps_sh=o3.Irreps.spherical_harmonics(lmax=2),
-                       edge_basis=10, fch=16):
+                       edge_basis=10, fch=16, **kwargs):
         super(Eq_NLMP2, self).__init__()
 
         self.irreps_input = o3.Irreps(irreps_input)
@@ -54,9 +54,8 @@ class Eq_NLMP2(torch.nn.Module):
         self.irreps_sh = o3.Irreps(irreps_sh)
         self.tp = o3.FullyConnectedTensorProduct(3*self.irreps_input, self.irreps_sh, self.gate.irreps_in, shared_weights=False)
         self.tp2 = o3.FullyConnectedTensorProduct(self.irreps_output, self.irreps_sh, self.irreps_output, shared_weights=False)
-        self.edge_basis = edge_basis
-        self.fc = nn.FullyConnectedNet([self.edge_basis, fch, self.tp.weight_numel], torch.relu)
-        self.fc2 = nn.FullyConnectedNet([self.edge_basis, fch, self.tp2.weight_numel], torch.relu)
+        self.fc = nn.FullyConnectedNet([edge_basis, fch, self.tp.weight_numel], torch.relu)
+        self.fc2 = nn.FullyConnectedNet([edge_basis, fch, self.tp2.weight_numel], torch.relu)
 
         self.lin = torch.nn.Sequential(
             o3GatedLinear(self.irreps_input+self.irreps_output, self.irreps_output),
@@ -75,26 +74,26 @@ class Eq_NLMP2(torch.nn.Module):
         return data
 
 class nEq_NLMP2(torch.nn.Module):
-    def __init__(self, irreps_input, irreps_output, act=torch.tanh,
-                       edge_basis=10, fch=16):
+    def __init__(self, irreps_input, irreps_output, act=SiLU(),
+                       edge_basis=10, fch=256, **kwargs):
         super(nEq_NLMP2, self).__init__()
 
         self.irreps_input = irreps_input
         self.irreps_output = irreps_output
 
         self.lin1 = torch.nn.Sequential(
-            Linear(3*self.irreps_input, self.irreps_output), Tanh(),
-            Linear(self.irreps_output, self.irreps_output)
+            Linear(3*self.irreps_input+edge_basis, fch), act,
+            Linear(fch, self.irreps_output)
         )
         self.lin2 = torch.nn.Sequential(
-            Linear(self.irreps_input+self.irreps_output, self.irreps_output), Tanh(),
-            Linear(self.irreps_output, self.irreps_output)
+            Linear(self.irreps_input+self.irreps_output, fch), act,
+            Linear(fch, self.irreps_output)
         )
 
     def forward(self, data):
         
         edge_src, edge_dst = data.edge_index
-        data.he += self.lin1(torch.cat([data.he,data.hn[edge_src],data.hn[edge_dst]],dim=1))
+        data.he += self.lin1(torch.cat([data.he,data.hn[edge_src],data.hn[edge_dst],data.emb],dim=1))
         node_ftr = scatter(data.he*data.norm.view(-1, 1), edge_dst, dim=0, dim_size=data.num_nodes)
         data.hn += self.lin2(torch.cat([data.hn,node_ftr],dim=1))
         

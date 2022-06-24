@@ -11,24 +11,25 @@ node_basis: 6
 num_nodes: 5000
 dt: .01
 ts: [3,6]
-test_ts: [6,6.5]
+test_ts: [6,7]
 rollout: 1
-test_rollout: 50
+test_rollout: 100
 data_aug: False
 
 # Model #
-rc: .025
-latent_layers: 10
+rc: .03
+latent_layers: 12
 latent_scalars: 16
 latent_vectors: 16
 latent_tensors: 0
-model_type: 'equivariant'
-solver: 'rk4'
-sensitivity: 'interpolated_adjoint'
+model_type: 'non-equivariant'
+act: 'relu'
+solver: 'euler'
+sensitivity: 'autograd'
 
 # Training #
 batch_size: 1
-lr: 0.05
+lr: 0.005
 epochs: 100
 gpus: -1
 noise_var: 0.001

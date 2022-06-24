@@ -10,7 +10,7 @@ from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.plugins import DDPPlugin
 import wandb
-os.environ["WANDB_MODE"] = "offline"
+# os.environ["WANDB_MODE"] = "offline"
 pl.seed_everything(42)
 
 def parse_command_line():

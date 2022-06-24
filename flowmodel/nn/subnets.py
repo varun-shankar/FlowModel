@@ -9,9 +9,10 @@ class Latent(torch.nn.Module):
         super(Latent, self).__init__()
 
         self.layers = torch.nn.ModuleList()
+        self.layers.append(NormLayer())
         for i in range(num_layers):
             self.layers.append(layer_type(irreps_latent, irreps_latent, **kwargs))
-            self.layers.append(LayerNorm())
+            self.layers.append(NormLayer())
 
     def forward(self, data):
 
@@ -21,26 +22,26 @@ class Latent(torch.nn.Module):
         return data
 
 class Encoder(torch.nn.Module):
-    def __init__(self, irreps_in, irreps_latent, model_type='equivariant'):
+    def __init__(self, irreps_in, irreps_latent, model_type='equivariant', **kwargs):
         super(Encoder, self).__init__()
 
         if model_type=='equivariant' or model_type=='reservoir':
             self.node_enc = torch.nn.Sequential(
-                o3GatedLinear(irreps_in, irreps_latent),
-                o3.Linear(irreps_latent, irreps_latent), LayerNorm()
+                o3GatedLinear(irreps_in, irreps_latent, **kwargs),
+                o3.Linear(irreps_latent, irreps_latent)
             )
             self.edge_enc = torch.nn.Sequential(
-                o3GatedLinear('0e+1o', irreps_latent),
-                o3.Linear(irreps_latent, irreps_latent), LayerNorm()
+                o3GatedLinear('0e+1o', irreps_latent, **kwargs),
+                o3.Linear(irreps_latent, irreps_latent)
             )
         else:
             self.node_enc = torch.nn.Sequential(
-                Linear(irreps_in, irreps_latent), Tanh(),
-                Linear(irreps_latent, irreps_latent), LayerNorm()
+                Linear(irreps_in, irreps_latent), kwargs.get('act', SiLU()),
+                Linear(irreps_latent, irreps_latent)
             )
             self.edge_enc = torch.nn.Sequential(
-                Linear(4, irreps_latent), Tanh(),
-                Linear(irreps_latent, irreps_latent), LayerNorm()
+                Linear(4, irreps_latent), kwargs.get('act', SiLU()),
+                Linear(irreps_latent, irreps_latent)
             )
 
     def forward(self, data):
@@ -52,17 +53,17 @@ class Encoder(torch.nn.Module):
         return data
 
 class Decoder(torch.nn.Module):
-    def __init__(self, irreps_latent, irreps_out, model_type='equivariant'):
+    def __init__(self, irreps_latent, irreps_out, model_type='equivariant', **kwargs):
         super(Decoder, self).__init__()
 
         if model_type=='equivariant' or model_type=='reservoir':
             self.node_dec = torch.nn.Sequential(
-                o3GatedLinear(irreps_latent, irreps_latent),
+                o3GatedLinear(irreps_latent, irreps_latent, **kwargs),
                 o3.Linear(irreps_latent, irreps_out)
             )
         else:
             self.node_dec = torch.nn.Sequential(
-                Linear(irreps_latent, irreps_latent), Tanh(),
+                Linear(irreps_latent, irreps_latent), kwargs.get('act', SiLU()),
                 Linear(irreps_latent, irreps_out)
             )
 
