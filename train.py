@@ -1,16 +1,12 @@
-import torch
 import os, glob, sys, yaml, argparse
 from types import SimpleNamespace
 sys.path.append('/home/opc/data/ml-cfd/FlowModel')
 import flowmodel.data.modules as datamodules
-from flowmodel.data.modules import Data, OFDataModule, KaggleDataModule
-from model_def import LitModel
+from flowmodel.nn.model import LitModel
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-from pytorch_lightning.plugins import DDPPlugin
 import wandb
-# os.environ["WANDB_MODE"] = "offline"
 pl.seed_everything(42)
 
 def parse_command_line():
@@ -42,7 +38,7 @@ elif config.get('job_type') == 'retrain':
     else:
         ckpt = max(glob.glob('checkpoints/run-'+config.get('load_id')+'*'), key=os.path.getctime)
     print('Loading '+ckpt)
-    model = LitModel.load_from_checkpoint(ckpt, **config)
+    model = LitModel.load_from_checkpoint(ckpt, loss_fn=dm.loss_fn, **config)
     ckpt = None
     run_id = wandb.util.generate_id()
 elif config.get('job_type') == 'resume' or 'eval':
@@ -51,7 +47,7 @@ elif config.get('job_type') == 'resume' or 'eval':
     else:
         ckpt = max(glob.glob('checkpoints/run-'+config.get('load_id')+'*'), key=os.path.getctime)
     print('Loading '+ckpt)
-    model = LitModel.load_from_checkpoint(ckpt)
+    model = LitModel.load_from_checkpoint(ckpt, loss_fn=dm.loss_fn)
     import re
     run_id = re.search('run-(.*)-best', ckpt).group(1)
 else:
@@ -75,7 +71,7 @@ if config.get('job_type') != 'eval':
     )
     trainer.fit(model, dm)
     if int(os.environ.get('LOCAL_RANK', 0)) == 0:
-        trainer = pl.Trainer(gpus=0, logger=wandb_logger, limit_test_batches=5)
+        trainer = pl.Trainer(gpus=1, logger=wandb_logger, limit_test_batches=5)
         trainer.test(model, datamodule=dm)
 else:
     dm.setup('fit')

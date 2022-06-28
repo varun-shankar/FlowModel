@@ -1,35 +1,37 @@
 # Init #
 project: 'flow-model'
-job_type: 'train'
-# load_id: 'dy6bdhyy'
+job_type: 'retrain'
+load_id: '1tjyb3wm'
 
 # Data #
 data_module: 'OFDataModule'
 case: '../OpenFoam/cylinder2D_base'
 zones: ['internal','cylinder','inlet','outlet','top','bottom']
 node_basis: 6
-num_nodes: 5000
+num_nodes: 10000
 dt: .01
 ts: [3,6]
 test_ts: [6,7]
 rollout: 1
 test_rollout: 100
+sample_graph: 'cluster'
+seed_num: 1
+hops: 50
 data_aug: False
 
 # Model #
-rc: .03
-latent_layers: 12
+rc: .02
+latent_layers: 10
 latent_scalars: 16
 latent_vectors: 16
 latent_tensors: 0
-model_type: 'non-equivariant'
+model_type: 'equivariant'
 act: 'relu'
 solver: 'euler'
 sensitivity: 'autograd'
 
 # Training #
-batch_size: 1
-lr: 0.005
+lr: 0.02
 epochs: 100
 gpus: -1
 noise_var: 0.001

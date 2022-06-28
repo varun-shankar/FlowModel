@@ -1,27 +1,26 @@
 import torch
 from typing import Optional
 import random
-import numpy as np
 from torch_cluster import knn_graph, radius_graph
-from .load_OF import load_case, load_kaggle, load_nek
-from .load_SU2 import load_SU2
-import glob, re
+import glob, re, os
 import torch.nn.functional as F
 from torch_geometric.data import Data as pygData
+from torch_geometric.data import Batch as pygBatch
 from torch_geometric.utils import degree
 from e3nn.math import soft_one_hot_linspace
 from e3nn import o3, io
-from torch_geometric.loader import DataLoader
+from torch_geometric.loader import DataLoader, NeighborSampler, RandomNodeSampler
+from torch_geometric.loader import GraphSAINTRandomWalkSampler as RWSampler
 import pytorch_lightning as pl
 
 ###### Data Class ###################################################################################
 
 class Data(pygData):
-    def __cat_dim__(self, key, value, *args, **kwargs):
-        if key == 'y':
-            return 1
-        else:
-            return super().__cat_dim__(key, value, *args, **kwargs)
+    # def __cat_dim__(self, key, value, *args, **kwargs):
+    #     if key == 'y':
+    #         return 1
+    #     else:
+    #         return super().__cat_dim__(key, value, *args, **kwargs)
 
     def rotate(self, rot):
         irreps_in = o3.Irreps(self.irreps_io[0][0]).simplify()
@@ -29,7 +28,7 @@ class Data(pygData):
         D_in = irreps_in.D_from_matrix(rot).type_as(self.x)
         D_out = irreps_out.D_from_matrix(rot).type_as(self.x)
         self.x = self.x @ D_in.T
-        self.pos = self.pos @ rot.T
+        self.pos = self.pos @ rot.type_as(self.x).T
         self.y = self.y @ D_out.T
         return self, D_out
 
@@ -39,18 +38,67 @@ class Data(pygData):
         deg_inv_sqrt = deg.pow(-0.5)
         deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
         self.norm = deg_inv_sqrt[edge_src] * deg_inv_sqrt[edge_dst]
+        self.norm = self.norm * self.edge_norm if 'edge_norm' in self else self.norm
 
         self.edge_vec = self.pos[edge_dst] - self.pos[edge_src]
         rc = float(self.rc.max()) if torch.is_tensor(self.rc) else self.rc
         self.emb = soft_one_hot_linspace(self.edge_vec.norm(dim=1), 0.0, rc, num_basis, 
             basis='fourier', cutoff=True).mul(num_basis**0.5)
 
+def check_sampled_data(dataset):
+    nn = 0; ne = 0
+    for i in range(len(dataset)):
+        nn += dataset[i].num_nodes
+        ne += dataset[i].edge_index.size(1)
+    print(f'Sampled data: {nn/len(dataset):.2f} nodes, {ne/len(dataset):.2f} edges')
+
+class RWSampled_Dataset(RWSampler):
+    def __init__(self, data, **kwargs):
+        self.finished_loading = False
+        super().__init__(data, **kwargs)
+        self.finished_loading = True
+        self.g = torch.Generator(); self.g.seed()
+        _ = check_sampled_data(self) if int(os.environ.get('LOCAL_RANK', 0)) == 0 else 0
+    def __getitem__(self, idx):
+        if self.finished_loading:
+            sample_ids = (self.data.batch==idx).nonzero().flatten()
+            start = sample_ids[torch.randint(0, sample_ids.size(0), 
+                (self.__batch_size__,), generator=self.g, dtype=torch.long)]
+            n_id = self.adj.random_walk(start.flatten(), self.walk_length).view(-1)
+            adj, _ = self.adj.saint_subgraph(n_id)
+            data = RWSampler.__collate__(self, [(n_id, adj)])
+            data.irreps_io = data.irreps_io[0]
+            return data
+        else:
+            return RWSampler.__getitem__(self, idx)
+
+class Cluster_Dataset(NeighborSampler):
+    def __init__(self, data, batch_size=1, num_steps=1, **kwargs):
+        self.data = data
+        self.batch_size = batch_size
+        self.num_steps = num_steps
+        self.N = data.num_nodes
+        self.E = data.edge_index.size(1)
+        super().__init__(data.edge_index, **kwargs)
+        self.sample_coverage = 0
+        self.g = torch.Generator(); self.g.seed()
+        _ = check_sampled_data(self) if int(os.environ.get('LOCAL_RANK', 0)) == 0 else 0
+    def __len__(self):
+        return self.num_steps
+    def __getitem__(self, idx):
+        sample_ids = (self.data.batch==idx).nonzero().flatten()
+        n_id = self.sample(sample_ids[torch.randint(0, sample_ids.size(0), 
+            (self.batch_size,), generator=self.g, dtype=torch.long)])[1]
+        adj, _ = self.adj_t.saint_subgraph(n_id)
+        data = RWSampler.__collate__(self, [(n_id, adj)])
+        data.irreps_io = data.irreps_io[0]
+        return data
 
 ###### OpenFoam #####################################################################################
 
 class OFDataModule(pl.LightningDataModule):
     def __init__(self, case, zones, ts, rc,
-                       num_nodes=-1, 
+                       num_nodes=-1, sample_graph=False,
                        rollout=1,
                        data_fields=['p','U'], data_irreps=['0e+1o','0e+1o'],
                        knn=False,
@@ -63,6 +111,7 @@ class OFDataModule(pl.LightningDataModule):
         self.ts = ts
         self.rc = rc
         self.num_nodes = num_nodes
+        self.sample_graph = sample_graph
         self.rollout = rollout
         self.data_fields = data_fields
         self.data_irreps = data_irreps
@@ -77,7 +126,7 @@ class OFDataModule(pl.LightningDataModule):
         self.__dict__.update(kwargs)
 
     def setup(self, stage: Optional[str] = None):
-
+        from .load_OF import load_OF
         if stage == 'fit':
             self.ts = self.ts if torch.is_tensor(self.ts) else torch.arange(self.ts[0],
                 self.ts[1]+1e-8,step=self.dt)
@@ -86,7 +135,7 @@ class OFDataModule(pl.LightningDataModule):
             all_ts = torch.cat([self.ts,self.test_ts],dim=0)
 
             ### Read data ###
-            p, b, v = load_case(self.case, self.data_fields, all_ts, self.zones)
+            p, b, v = load_OF(self.case, self.data_fields, all_ts, self.zones)
 
             # Sample internal nodes
             if self.num_nodes != -1:
@@ -117,25 +166,50 @@ class OFDataModule(pl.LightningDataModule):
                 edge_index = knn_graph(pos, k=self.rc)
             else:
                 edge_index = radius_graph(pos, r=self.rc, max_num_neighbors=32)
-            print('Avg neighbors = ', edge_index.shape[1]/pos.shape[0])
+            if int(os.environ.get('LOCAL_RANK', 0)) == 0:
+                print(f'Avg neighbors: {edge_index.shape[1]/pos.shape[0]:.2f}')
 
             ### Generate dataset ###
-            dataset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], irreps_io=self.irreps_io,
-                            ts=(all_ts[i:i+1+self.rollout]), emb_node=b1hot,
-                            pos=pos, edge_index=edge_index, rc=self.rc) for i in range(len(self.ts)-self.rollout)]
+            dataset = [Data(x=features[i,:,:], emb_node=b1hot,
+                            y=fields[i+1:i+1+self.rollout,:,:].transpose(0,1), 
+                            irreps_io=self.irreps_io,
+                            ts=(all_ts[i:i+1+self.rollout].unsqueeze(0)), 
+                            pos=pos, edge_index=edge_index, rc=self.rc
+                            ) for i in range(len(self.ts)-self.rollout)]
             if self.random_split:
                 random.shuffle(dataset)
             self.train_data = dataset[:int((len(dataset)+1)*self.train_split)] 
             self.val_data = dataset[int((len(dataset)+1)*self.train_split):]
 
+            if self.sample_graph != None:
+                self.train_data = pygBatch.from_data_list(self.train_data)
+                if self.sample_graph == 'random walk':
+                    self.train_data = RWSampled_Dataset(self.train_data, 
+                        batch_size=getattr(self,'seed_num',1000), num_steps=self.train_data.num_graphs,
+                        walk_length=getattr(self,'hops',getattr(self,'latent_layers',10)), 
+                        sample_coverage=getattr(self,'sample_coverage',0),
+                        save_dir='.')
+                elif self.sample_graph == 'cluster':
+                    self.train_data = Cluster_Dataset(self.train_data, 
+                        batch_size=getattr(self,'seed_num',1), num_steps=self.train_data.num_graphs,
+                        sizes=-1*torch.ones(getattr(self,'hops',getattr(self,'latent_layers',10))))
+                else:
+                    print('Unknown sampling method')
+
             # Test
-            testset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], irreps_io=self.irreps_io,
-                            ts=(all_ts[i:i+1+self.rollout]), emb_node=b1hot,
-                            pos=pos, edge_index=edge_index, rc=self.rc) for i in range(
+            testset = [Data(x=features[i,:,:], emb_node=b1hot,
+                            y=fields[i+1:i+1+self.rollout,:,:].transpose(0,1), 
+                            irreps_io=self.irreps_io,
+                            ts=(all_ts[i:i+1+self.rollout].unsqueeze(0)), 
+                            pos=pos, edge_index=edge_index, rc=self.rc
+                            ) for i in range(
                                 len(self.ts),len(self.ts)+len(self.test_ts)-self.rollout)]
-            testset_rollout = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.test_rollout,:,:], irreps_io=self.irreps_io,
-                            ts=(all_ts[i:i+1+self.test_rollout]), emb_node=b1hot,
-                            pos=pos, edge_index=edge_index, rc=self.rc) for i in range(
+            testset_rollout = [Data(x=features[i,:,:], emb_node=b1hot,
+                                y=fields[i+1:i+1+self.test_rollout,:,:].transpose(0,1), 
+                                irreps_io=self.irreps_io,
+                                ts=(all_ts[i:i+1+self.test_rollout].unsqueeze(0)), 
+                                pos=pos, edge_index=edge_index, rc=self.rc
+                                ) for i in range(
                                 len(self.ts),len(self.ts)+len(self.test_ts)-self.test_rollout)]
             self.test_data = testset
             self.test_data_rollout = testset_rollout
@@ -151,7 +225,8 @@ class OFDataModule(pl.LightningDataModule):
                 DataLoader(self.test_data_rollout, num_workers=8)]
 
     def loss_fn(self, y_hat, data):
-        return F.mse_loss(y_hat, data.y)
+        return torch.sum((y_hat - data.y.transpose(0,1))**2 * data.node_norm.unsqueeze(-1)) if \
+            'node_norm' in data else torch.mean((y_hat - data.y.transpose(0,1))**2)
 
 
 ###### Kaggle #######################################################################################
@@ -183,7 +258,7 @@ class KaggleDataModule(pl.LightningDataModule):
         self.irreps_io = [self.data_irreps,self.label_irrep.__repr__()]
 
     def setup(self, stage: Optional[str] = None):
-        
+        from .load_kaggle import load_kaggle
         if stage == 'fit':
             ### Read data ###
             self.cases = []
@@ -259,7 +334,8 @@ class KaggleDataModule(pl.LightningDataModule):
                     edge_index = knn_graph(pos, k=rc)
                 else:
                     edge_index = radius_graph(pos, r=rc, loop=True, max_num_neighbors=32)
-                print('Avg neighbors = ', edge_index.shape[1]/pos.shape[0])
+                if int(os.environ.get('LOCAL_RANK', 0)) == 0:
+                    print(f'Avg neighbors: {edge_index.shape[1]/pos.shape[0]:.2f}')
 
                 data = Data(x=features, y=fields.unsqueeze(0), irreps_io=self.irreps_io,
                             dts=torch.ones(1), emb_node=emb_node,
@@ -315,7 +391,7 @@ class NekDataModule(pl.LightningDataModule):
         self.__dict__.update(kwargs)
 
     def setup(self, stage: Optional[str] = None):
-
+        from .load_nek import load_nek
         if stage == 'fit':
 
             ### Read data ###
@@ -345,7 +421,8 @@ class NekDataModule(pl.LightningDataModule):
                 edge_index = knn_graph(pos, k=self.rc)
             else:
                 edge_index = radius_graph(pos, r=self.rc, max_num_neighbors=32)
-            print('Avg neighbors = ', edge_index.shape[1]/pos.shape[0])
+            if int(os.environ.get('LOCAL_RANK', 0)) == 0:
+                print(f'Avg neighbors: {edge_index.shape[1]/pos.shape[0]:.2f}')
 
             ### Generate dataset ###
             dataset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], irreps_io=self.irreps_io,
@@ -411,7 +488,7 @@ class SU2DataModule(pl.LightningDataModule):
         self.__dict__.update(kwargs)
 
     def setup(self, stage: Optional[str] = None):
-
+        from .load_SU2 import load_SU2
         if stage == 'fit':
             dataset = []
             neighbors = []
@@ -449,7 +526,9 @@ class SU2DataModule(pl.LightningDataModule):
                             dts=torch.ones(1), emb_node=b1hot,
                             pos=pos, edge_index=edge_index, rc=self.rc)
                 dataset.append(data)
-            print('Avg neighbors = ', sum(neighbors)/len(neighbors))
+            if int(os.environ.get('LOCAL_RANK', 0)) == 0:
+                print(f'Avg neighbors: {sum(neighbors)/len(neighbors):.2f}')
+
             if self.random_split:
                 random.shuffle(dataset)
             self.train_data = dataset[:int((len(dataset)+1)*self.train_split)] 

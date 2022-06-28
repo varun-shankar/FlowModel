@@ -1,13 +1,15 @@
 import numpy as np
 import time
-import os
+import os, sys
 import matplotlib.pyplot as plt
 from matplotlib import animation, rc
 import torch
-from data import Data
+sys.path.append('/home/opc/data/ml-cfd/FlowModel')
+from flowmodel.data.modules import Data
 from scipy.interpolate import griddata
 
 data, pred = torch.load('data_rollout.pt', map_location=torch.device('cpu'))
+data.y = data.y.transpose(0,1)
 print(torch.nn.functional.mse_loss(data.y,pred).item())
 inds = torch.isclose(data.pos[:,2],data.pos[:,2].mean(),rtol=1e-2)
 pos = data.pos[inds,:]

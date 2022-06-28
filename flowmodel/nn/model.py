@@ -1,7 +1,6 @@
 import torch
 import copy, sys
-sys.path.append('/home/opc/data/ml-cfd/FlowModel')
-from flowmodel.nn.build_model import build_model
+from .build_model import build_model
 from torchmetrics import MeanSquaredError
 from torch_scatter import scatter
 from e3nn import o3, nn, io
@@ -29,7 +28,7 @@ class LitModel(pl.LightningModule):
 
     def forward(self, data):
 
-        _ = data.rotate(o3.rand_matrix().type_as(data.x)) if self.data_aug and self.training else 0
+        _ = data.rotate(o3.rand_matrix()) if self.data_aug and self.training else 0
 
         xi = data.x
         if self.training:
@@ -37,7 +36,7 @@ class LitModel(pl.LightningModule):
             (self.noise_var)**.5
         
         self.node.dudt.data = data
-        t, yhs = self.node(xi, data.ts)
+        t, yhs = self.node(xi, data.ts[0,:])
 
         return yhs[1:,:,:]
 
@@ -69,7 +68,7 @@ class LitModel(pl.LightningModule):
             data = batch
 
             rot_data = copy.deepcopy(data)
-            rot = o3.rand_matrix().type_as(data.x)
+            rot = o3.rand_matrix()
             rot_data, D_out = rot_data.rotate(rot)
 
             y_hat = self(data)

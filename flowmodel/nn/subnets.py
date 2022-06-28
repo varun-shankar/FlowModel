@@ -80,7 +80,7 @@ class dudt(torch.nn.Module):
         self.dec = dec
         self.data = None
 
-    def forward(self, u):
+    def forward(self, t, u):
         self.data.hn = u
         self.enc(self.data)
         self.f(self.data)
