@@ -1,10 +1,10 @@
 import numpy as np
-import time
-import os
+import os, sys
 import matplotlib.pyplot as plt
 from matplotlib import animation, rc
 import torch
-from data import Data
+sys.path.append('/home/opc/data/ml-cfd/FlowModel')
+from flowmodel.data.modules import Data
 from scipy.interpolate import griddata
 from e3nn import o3, io
 from scipy.ndimage import gaussian_filter
@@ -46,4 +46,4 @@ for i in range(4):
 axs[0].scatter(pos[:,0],pos[:,1], s=.1)
 
 plt.tight_layout()
-plt.savefig('kaggle.png')
+plt.savefig('plotting/kaggle.png')

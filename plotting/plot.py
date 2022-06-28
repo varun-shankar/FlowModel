@@ -47,4 +47,4 @@ def animate(i):
 
 anim = animation.FuncAnimation(fig, animate,
                                frames=pred.shape[0], interval=50, blit=True) 
-anim.save('movie.gif', writer='ffmpeg', fps=24)
+anim.save('plotting/movie.gif', writer='ffmpeg', fps=24)
