@@ -1,9 +1,8 @@
 import torch
 import os, glob, sys, argparse, yaml
 from types import SimpleNamespace
-sys.path.append('/home/opc/data/ml-cfd/FlowModel')
 import flowmodel.data.modules as datamodules
-from model_def import LitModel
+from flowmodel.nn.model import LitModel
 import pytorch_lightning as pl
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor

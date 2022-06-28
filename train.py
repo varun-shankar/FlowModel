@@ -1,6 +1,5 @@
 import os, glob, sys, yaml, argparse
 from types import SimpleNamespace
-sys.path.append('/home/opc/data/ml-cfd/FlowModel')
 import flowmodel.data.modules as datamodules
 from flowmodel.nn.model import LitModel
 import pytorch_lightning as pl

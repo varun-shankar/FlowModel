@@ -3,7 +3,6 @@ import os, sys
 import matplotlib.pyplot as plt
 from matplotlib import animation, rc
 import torch
-sys.path.append('/home/opc/data/ml-cfd/FlowModel')
 from flowmodel.data.modules import Data
 from scipy.interpolate import griddata
 from e3nn import o3, io
