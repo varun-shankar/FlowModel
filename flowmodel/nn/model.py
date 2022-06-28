@@ -1,15 +1,13 @@
 import torch
 import copy, sys
 from .build_model import build_model
-from torchmetrics import MeanSquaredError
-from torch_scatter import scatter
-from e3nn import o3, nn, io
+from e3nn import o3
 from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts, StepLR, OneCycleLR
 import pytorch_lightning as pl
 
 
 class LitModel(pl.LightningModule):
-    def __init__(self, irreps_in, irreps_out, loss_fn=None,
+    def __init__(self, irreps_in, irreps_out, loss_fn,
                 latent_layers=4, latent_scalars=8, latent_vectors=8, latent_tensors=0,
                 model_type='equivariant', noise_var=0, data_aug=False,
                 lr=1e-3, epochs=None, **kwargs):
@@ -20,7 +18,7 @@ class LitModel(pl.LightningModule):
         self.node = build_model(model_type, 
             irreps_in, irreps_out,
             latent_layers, latent_scalars, latent_vectors, latent_tensors, **kwargs)
-        self.loss_fn = MeanSquaredError() if loss_fn is None else loss_fn
+        self.loss_fn = loss_fn
         self.lr = lr
         self.epochs = epochs
         self.noise_var = noise_var

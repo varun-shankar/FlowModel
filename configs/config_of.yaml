@@ -1,19 +1,19 @@
 # Init #
 project: 'flow-model'
-job_type: 'retrain'
-load_id: '1tjyb3wm'
+job_type: 'train'
+# load_id: '1tjyb3wm'
 
 # Data #
 data_module: 'OFDataModule'
 case: '../OpenFoam/cylinder2D_base'
 zones: ['internal','cylinder','inlet','outlet','top','bottom']
 node_basis: 6
-num_nodes: 10000
+num_nodes: 8000
 dt: .01
 ts: [3,6]
-test_ts: [6,7]
+test_ts: [6,7.5]
 rollout: 1
-test_rollout: 100
+test_rollout: 150
 sample_graph: 'cluster'
 seed_num: 1
 hops: 50
@@ -31,7 +31,7 @@ solver: 'euler'
 sensitivity: 'autograd'
 
 # Training #
-lr: 0.02
+lr: 0.05
 epochs: 100
 gpus: -1
 noise_var: 0.001

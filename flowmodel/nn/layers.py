@@ -38,7 +38,7 @@ class Eq_NLMP(torch.nn.Module):
         return scatter(edge_ftr, edge_dst, dim=0, dim_size=data.num_nodes)
 
 class Eq_NLMP2(torch.nn.Module):
-    def __init__(self, irreps_input, irreps_output, act=Tanh(),
+    def __init__(self, irreps_input, irreps_output, act=ReLU(),
                        irreps_sh=o3.Irreps.spherical_harmonics(lmax=2),
                        edge_basis=10, fch=16, **kwargs):
         super(Eq_NLMP2, self).__init__()
@@ -74,12 +74,12 @@ class Eq_NLMP2(torch.nn.Module):
         return data
 
 class nEq_NLMP2(torch.nn.Module):
-    def __init__(self, irreps_input, irreps_output, act=SiLU(),
+    def __init__(self, irreps_input, irreps_output, act=ReLU(),
                        edge_basis=10, fch=256, **kwargs):
         super(nEq_NLMP2, self).__init__()
 
-        self.irreps_input = irreps_input
-        self.irreps_output = irreps_output
+        self.irreps_input = irreps_input.dim
+        self.irreps_output = irreps_output.dim
 
         self.lin1 = torch.nn.Sequential(
             Linear(3*self.irreps_input+edge_basis, fch), act,
@@ -139,13 +139,13 @@ class nEq_NLMP_aniso(torch.nn.Module):
         return scatter(edge_ftr, edge_dst, dim=0, dim_size=data.num_nodes)
 
 class GCN(torch.nn.Module):
-    def __init__(self, features_input, features_output, act=torch.tanh):
+    def __init__(self, irreps_input, irreps_output, act=torch.tanh):
         super(GCN, self).__init__()
 
-        self.features_input = features_input
-        self.features_output = features_output
+        self.irreps_input = irreps_input.dim
+        self.irreps_output = irreps_output.dim
         self.act = act
-        self.f = GCNConv(features_input, features_output)
+        self.f = GCNConv(self.irreps_input, self.irreps_output)
 
     def forward(self, data):
         data.hn = self.act(self.f(data.hn, data.edge_index))+0*data.he.mean()

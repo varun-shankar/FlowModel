@@ -122,7 +122,7 @@ class OFDataModule(pl.LightningDataModule):
         self.test_rollout = test_rollout
         self.shuffle = shuffle
         self.batch_size = batch_size
-        self.irreps_io = self.data_irreps#[f'{len(self.zones):g}'+'x0e+'+self.data_irreps[0],self.data_irreps[1]]
+        self.irreps_io = self.data_irreps
         self.__dict__.update(kwargs)
 
     def setup(self, stage: Optional[str] = None):

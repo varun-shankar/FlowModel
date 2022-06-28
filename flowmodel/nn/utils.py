@@ -1,10 +1,10 @@
 import torch
 from e3nn import o3, nn
-from torch.nn import ReLU, Tanh, SiLU
+from torch.nn import ReLU
 
 ## Helpers ##
 class o3GatedLinear(torch.nn.Module):
-    def __init__(self, irreps_input, irreps_output, act=Tanh(), **kwargs):
+    def __init__(self, irreps_input, irreps_output, act=ReLU(), **kwargs):
         super(o3GatedLinear, self).__init__()
 
         self.irreps_input = o3.Irreps(irreps_input)

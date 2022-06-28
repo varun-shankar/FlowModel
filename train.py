@@ -40,7 +40,7 @@ elif config.get('job_type') == 'retrain':
     model = LitModel.load_from_checkpoint(ckpt, loss_fn=dm.loss_fn, **config)
     ckpt = None
     run_id = wandb.util.generate_id()
-elif config.get('job_type') == 'resume' or 'eval':
+elif config.get('job_type') in {'resume', 'eval'}:
     if config.get('load_id', None) is None:
         ckpt = max(glob.glob('checkpoints/*'), key=os.path.getctime)
     else:

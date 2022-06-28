@@ -25,7 +25,7 @@ class Encoder(torch.nn.Module):
     def __init__(self, irreps_in, irreps_latent, model_type='equivariant', **kwargs):
         super(Encoder, self).__init__()
 
-        if model_type=='equivariant' or model_type=='reservoir':
+        if model_type=='equivariant':
             self.node_enc = torch.nn.Sequential(
                 o3GatedLinear(irreps_in, irreps_latent, **kwargs),
                 o3.Linear(irreps_latent, irreps_latent)
@@ -36,12 +36,12 @@ class Encoder(torch.nn.Module):
             )
         else:
             self.node_enc = torch.nn.Sequential(
-                Linear(irreps_in, irreps_latent), kwargs.get('act', SiLU()),
-                Linear(irreps_latent, irreps_latent)
+                Linear(irreps_in.dim, irreps_latent.dim), kwargs.get('act', ReLU()),
+                Linear(irreps_latent.dim, irreps_latent.dim)
             )
             self.edge_enc = torch.nn.Sequential(
-                Linear(4, irreps_latent), kwargs.get('act', SiLU()),
-                Linear(irreps_latent, irreps_latent)
+                Linear(4, irreps_latent.dim), kwargs.get('act', ReLU()),
+                Linear(irreps_latent.dim, irreps_latent.dim)
             )
 
     def forward(self, data):
@@ -56,15 +56,15 @@ class Decoder(torch.nn.Module):
     def __init__(self, irreps_latent, irreps_out, model_type='equivariant', **kwargs):
         super(Decoder, self).__init__()
 
-        if model_type=='equivariant' or model_type=='reservoir':
+        if model_type=='equivariant':
             self.node_dec = torch.nn.Sequential(
                 o3GatedLinear(irreps_latent, irreps_latent, **kwargs),
                 o3.Linear(irreps_latent, irreps_out)
             )
         else:
             self.node_dec = torch.nn.Sequential(
-                Linear(irreps_latent, irreps_latent), kwargs.get('act', SiLU()),
-                Linear(irreps_latent, irreps_out)
+                Linear(irreps_latent.dim, irreps_latent.dim), kwargs.get('act', ReLU()),
+                Linear(irreps_latent.dim, irreps_out.dim)
             )
 
     def forward(self, data):
@@ -89,7 +89,7 @@ class dudt(torch.nn.Module):
 
 class NODE(torch.nn.Module):
     def __init__(self, enc, f, dec, solver='naive_euler',
-        sensitivity='interpolated_adjoint', **kwargs):
+        sensitivity='autograd', **kwargs):
         super(NODE, self).__init__()
 
         self.dudt = dudt(enc, f, dec)
