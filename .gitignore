@@ -4,7 +4,7 @@ lightning_logs/
 wandb/
 checkpoints/
 flow-model/
-SU2_datagen/
+#SU2_datagen/
 *.pt
 *.dat
 *.vtk
