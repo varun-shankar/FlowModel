@@ -67,7 +67,7 @@ def run_adjoint(SU2_config, state):
 rc = 0.5
 num_nodes = 64
 learning_rate = 0.3 # play with this
-num_iters = 5
+num_iters = 1
 
 # logging
 dvs   = [] # design variable = bump_center
