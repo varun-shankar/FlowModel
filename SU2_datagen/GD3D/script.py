@@ -12,7 +12,7 @@ SU2_config = SU2.io.Config(config_filename)
 SU2_config["HISTORY_OUTPUT"].append("AERO_COEFF")
 state = SU2.io.State()
 
-SU2_config.NUMBER_PART = 1
+SU2_config.NUMBER_PART = 32 # nthreads
 SU2_config.NZONES = 1
 
 state.find_files(SU2_config)
@@ -103,7 +103,7 @@ for i in range(num_iters):
     print("#================================#")
     print("Building Geometry ")
     print("#================================#")
-    geometry3.build_shape(dv,bump_rad,num_nodes,.3)
+    geometry3.build_shape(dv)
 
     print("#================================#")
     print("SU2 Forward Solve ")
@@ -124,6 +124,12 @@ for i in range(num_iters):
     with torch.no_grad():
         dv -= dv.grad * lr
 
+    # append logs
+    dvs.append(dv.item())
+    drags.append(drag)
+    tt = time.perf_counter() - tic
+    times.append(tt)
+
     print("#======================================================#")
     print("Completed iteration:", it)
     print('Bump Center:', dv.item())
@@ -131,12 +137,6 @@ for i in range(num_iters):
     print('Drag:', drag)
     print('Wall Time:', tt)
     print("#======================================================#")
-
-    # append logs
-    dvs.append(dv.item())
-    drags.append(drag)
-    tt = time.perf_counter() - tic
-    times.append(tt)
 
     with torch.no_grad():
         dv.grad.zero_()

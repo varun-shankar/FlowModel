@@ -1,5 +1,6 @@
 import SU2
 import copy, glob, os, sys, time
+import numpy as np
 import pandas as pd
 import geometry
 import torch
@@ -12,9 +13,6 @@ SU2_config = SU2.io.Config(config_filename)
 SU2_config["HISTORY_OUTPUT"].append("AERO_COEFF")
 state = SU2.io.State()
 
-SU2_config.NUMBER_PART = 1
-SU2_config.NZONES = 1
-
 state.find_files(SU2_config)
 
 SU2_config.OPT_OBJECTIVE= {
@@ -25,6 +23,9 @@ SU2_config.OPT_OBJECTIVE= {
             'MARKER': 'front, bump, back'
         },
     }
+
+SU2_config.NUMBER_PART = 1 # NTHREADS
+SU2_config.NZONES = 1
 
 def run_direct(SU2_config):
     
@@ -67,7 +68,7 @@ def run_adjoint(SU2_config, state):
 rc = 0.5
 num_nodes = 64
 learning_rate = 0.3 # play with this
-num_iters = 5
+num_iters = 1
 
 # logging
 dvs   = [] # design variable = bump_center
@@ -89,6 +90,7 @@ dv = bc1.clone().detach().requires_grad_(True)
 
 # add initial state to log
 dvs.append(dv.item())
+geometry.build_shape(dv,bump_rad,num_nodes,.3)
 state, drag = run_direct(SU2_config)
 drags.append(drag)
 times.append(0.0)
@@ -124,6 +126,12 @@ for i in range(num_iters):
     with torch.no_grad():
         dv -= dv.grad * lr
 
+    # append logs
+    dvs.append(dv.item())
+    drags.append(drag)
+    tt = time.perf_counter() - tic
+    times.append(tt)
+
     print("#======================================================#")
     print("Completed iteration:", it)
     print('Bump Center:', dv.item())
@@ -131,12 +139,6 @@ for i in range(num_iters):
     print('Drag:', drag)
     print('Wall Time:', tt)
     print("#======================================================#")
-
-    # append logs
-    dvs.append(dv.item())
-    drags.append(drag)
-    tt = time.perf_counter() - tic
-    times.append(tt)
 
     with torch.no_grad():
         dv.grad.zero_()

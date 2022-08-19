@@ -16,3 +16,4 @@ flow-model/
 #log*.err
 .DS_STORE
 *.egg-info
+config*.cfg
