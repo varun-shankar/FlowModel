@@ -54,11 +54,11 @@ Fillet{1}{29, 23}{0.2}
 //+
 Field[1] = Box;
 //+
-Field[1].VIn = 0.1;
+Field[1].VIn = 0.08;
 //+
-Field[1].VOut = 0.5;
+Field[1].VOut = 0.7;
 //+
-Field[1].XMax = 8;
+Field[1].XMax = 10;
 //+
 Field[1].YMax = 2;
 //+
@@ -92,3 +92,7 @@ Dilate {{cx, 1.5, cz}, {1, 2, 1}} {
 }
 //+
 BooleanDifference{ Volume{1}; Delete; }{ Volume{2}; Delete; }
+//+
+Physical Volume("internal") = {1};
+//+
+Physical Surface("lidar") = {50};
