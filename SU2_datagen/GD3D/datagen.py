@@ -66,9 +66,8 @@ def run_adjoint(SU2_config, state):
 
     return adjoint_data
 
-ncases = 30
+ncases = 2
 
-# bump center range = 3.2 - 4.8
 xcenter = np.linspace(3.2, 4.8,ncases)
 
 drags = []

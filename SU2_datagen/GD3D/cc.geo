@@ -54,7 +54,8 @@ Fillet{1}{29, 23}{0.2}
 //+
 Field[1] = Box;
 //+
-Field[1].VIn = 0.2;
+//Field[1].VIn = 0.08; # original
+Field[1].VIn = 0.15;
 //+
 Field[1].VOut = 0.7;
 //+
@@ -96,23 +97,3 @@ BooleanDifference{ Volume{1}; Delete; }{ Volume{2}; Delete; }
 Physical Volume("internal") = {1};
 //+
 Physical Surface("lidar") = {50};
-//+
-Field[2] = Ball;
-//+
-Field[2].Radius = 0.1;
-//+
-Field[2].VIn = 0.05;
-//+
-Field[2].VOut = 1;
-//+
-Field[2].XCenter = cx;
-//+
-Field[2].YCenter = 1.5;
-//+
-Field[2].ZCenter = cz;
-//+
-Field[3] = Min;
-//+
-Field[3].FieldsList = {1, 2};
-//+
-Background Field = 3;
