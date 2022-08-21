@@ -1,10 +1,11 @@
 import SU2
 import copy, glob, os, sys, time
-import pandas as pd
 import geometry3
 import torch
 import meshio
 import shutil
+import pandas as pd
+import numpy as np
 
 config_filename = 'adjoint.cfg'
 
@@ -12,7 +13,8 @@ SU2_config = SU2.io.Config(config_filename)
 SU2_config["HISTORY_OUTPUT"].append("AERO_COEFF")
 state = SU2.io.State()
 
-SU2_config.NUMBER_PART = 1#32 # nthreads
+#SU2_config.NUMBER_PART = 32 # nthreads
+SU2_config.NUMBER_PART = 1 # nthreads
 SU2_config.NZONES = 1
 
 state.find_files(SU2_config)
@@ -64,42 +66,25 @@ def run_adjoint(SU2_config, state):
 
     return adjoint_data
 
-learning_rate = 0.3 # play with this
-num_iters = 1
+ncases = 30
 
-# logging
-dvs   = [] # design variable = bump_center
+# bump center range = 3.2 - 4.8
+xcenter = np.linspace(3.2, 4.8,ncases)
+
 drags = []
-times = [] # rolling wall time
+times = []
 
-## experiment with these initial conditions
-# bump center range = 3-5??
-bc1 = torch.Tensor([4.0, 0.0])
-#bc2 = torch.Tensor([4.0, 0.0])
-#bc3 = torch.Tensor([5.0, 0.0])
-
-# iterate over learning rate, and bump center
-lr = learning_rate
-dv = bc1.clone().detach().requires_grad_(True)
-
-# add initial state to log
-#dvs.append(dv.item())
-geometry3.build_shape(dv)
-state, drag = run_direct(SU2_config)
-drags.append(drag)
-times.append(0.0)
-
-tic = time.perf_counter()
-for i in range(num_iters):
-    it = i + 1
+for i in range(ncases):
+    tic = time.perf_counter()
     print("#======================================================#")
-    print("Iteration ", it)
+    print("Case ", i+1)
     print("#======================================================#")
 
     print("#================================#")
     print("Building Geometry ")
     print("#================================#")
-    geometry3.build_shape(dv)
+    bump_center = [xcenter[i],0]
+    geometry3.build_shape(bump_center)
 
     print("#================================#")
     print("SU2 Forward Solve ")
@@ -111,36 +96,21 @@ for i in range(num_iters):
     print("#================================#")
     adjoint_data = torch.tensor(run_adjoint(SU2_config, state))
 
-    print("#================================#")
-    print("Updating Bump Center ")
-    print("#================================#")
-    #pos.backward(adjoint_data.clone().detach())
-
-    #with torch.no_grad():
-    #    dv -= dv.grad * lr
-
-    # append logs
-    #dvs.append(dv.item())
-    #drags.append(drag)
     tt = time.perf_counter() - tic
+
+    drags.append(drag)
     times.append(tt)
 
     print("#======================================================#")
-    print("Completed iteration:", it)
-    print('Bump Center:', dv)
-    print('Gradient: ', dv.grad)
+    print("Case:", i+1)
+    print('Bump Center:', xcenter)
     print('Drag:', drag)
-    print('Wall Time:', tt)
+    print('Time taken:', tt)
     print("#======================================================#")
 
-    #with torch.no_grad():
-    #    dv.grad.zero_()
+    shutil.move('mesh.su2',f'data/mesh_{i}.su2')
+    shutil.move('surface_sens.vtk',f'data/sens_{i}.vtk')
 
-    ##shutil.move('mesh.su2',f'test_data/mesh_{i}.su2')
-    #shutil.move('surface_sens.vtk',f'test_data/sens_{i}.vtk')
-
-# save logs
-#name = "log_GD_lr_" + str(lr) + "bump_init_" + str(bc1.item())
-#np.save(name, [dvs, drags, times])
-
+name = "datagen_log"
+np.save(name, [xcenter, drags, times])
 #

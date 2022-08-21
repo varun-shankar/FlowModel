@@ -1,4 +1,4 @@
-cx = 3.0; cz = 0.0;
+cx = 3.2; cz = 0;
 //+
 SetFactory("OpenCASCADE");
 //+
