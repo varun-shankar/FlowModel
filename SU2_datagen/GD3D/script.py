@@ -79,8 +79,6 @@ bc1 = torch.Tensor([3.0, 0.0])
 bc2 = torch.Tensor([4.0, 0.0])
 bc3 = torch.Tensor([5.0, 0.0])
 
-bump_rad = 0.2
-
 # iterate over learning rate, and bump center
 lr = learning_rate
 dv = bc1.clone().detach().requires_grad_(True)
