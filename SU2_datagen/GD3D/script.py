@@ -64,8 +64,6 @@ def run_adjoint(SU2_config, state):
 
     return adjoint_data
 
-rc = 0.5
-num_nodes = 64
 learning_rate = 0.3 # play with this
 num_iters = 1
 
@@ -77,9 +75,9 @@ times = [] # rolling wall time
 ## experiment with these initial conditions
 # bump_center = torch.Tensor([5.5])
 bump_center = torch.FloatTensor(1).uniform_(3, 5)
-bc1 = torch.Tensor([3.0])
-bc2 = torch.Tensor([4.0])
-bc3 = torch.Tensor([5.0])
+bc1 = torch.Tensor([3.0, 0.0])
+bc2 = torch.Tensor([4.0, 0.0])
+bc3 = torch.Tensor([5.0, 0.0])
 
 bump_rad = 0.2
 
@@ -88,7 +86,8 @@ lr = learning_rate
 dv = bc1.clone().detach().requires_grad_(True)
 
 # add initial state to log
-dvs.append(dv.item())
+#dvs.append(dv.item())
+geometry3.build_shape(dv)
 state, drag = run_direct(SU2_config)
 drags.append(drag)
 times.append(0.0)
@@ -118,14 +117,13 @@ for i in range(num_iters):
     print("#================================#")
     print("Updating Bump Center ")
     print("#================================#")
-    pos = geometry3.get_bump_pos(dv,bump_rad,num_nodes)
-    pos.backward(adjoint_data.clone().detach())
+    #pos.backward(adjoint_data.clone().detach())
 
     with torch.no_grad():
         dv -= dv.grad * lr
 
     # append logs
-    dvs.append(dv.item())
+    #dvs.append(dv.item())
     drags.append(drag)
     tt = time.perf_counter() - tic
     times.append(tt)
@@ -146,6 +144,6 @@ for i in range(num_iters):
 
 # save logs
 name = "log_GD_lr_" + str(lr) + "bump_init_" + str(bc1.item())
-np.save(name, [dvs, drags, times])
+#np.save(name, [dvs, drags, times])
 
 #

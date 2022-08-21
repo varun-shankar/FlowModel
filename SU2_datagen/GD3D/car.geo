@@ -1,4 +1,4 @@
-cx = 4; cz = 0;
+cx = 3.0; cz = 0.0;
 //+
 SetFactory("OpenCASCADE");
 //+
@@ -54,7 +54,8 @@ Fillet{1}{29, 23}{0.2}
 //+
 Field[1] = Box;
 //+
-Field[1].VIn = 0.08;
+//Field[1].VIn = 0.08; # original
+Field[1].VIn = 0.2;
 //+
 Field[1].VOut = 0.7;
 //+

@@ -24,7 +24,7 @@ SU2_config.OPT_OBJECTIVE= {
         },
     }
 
-SU2_config.NUMBER_PART = 1 # NTHREADS
+SU2_config.NUMBER_PART = 2 # NTHREADS
 SU2_config.NZONES = 1
 
 def run_direct(SU2_config):

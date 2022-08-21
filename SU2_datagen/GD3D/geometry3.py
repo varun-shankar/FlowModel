@@ -21,5 +21,3 @@ def build_shape(bump_center):
     gmsh.finalize()
 
     return
-
-build_shape([4,0])
