@@ -117,31 +117,31 @@ for i in range(num_iters):
     print("#================================#")
     #pos.backward(adjoint_data.clone().detach())
 
-    with torch.no_grad():
-        dv -= dv.grad * lr
+    #with torch.no_grad():
+    #    dv -= dv.grad * lr
 
     # append logs
     #dvs.append(dv.item())
-    drags.append(drag)
-    tt = time.perf_counter() - tic
-    times.append(tt)
+    #drags.append(drag)
+    #tt = time.perf_counter() - tic
+    #times.append(tt)
 
     print("#======================================================#")
     print("Completed iteration:", it)
-    print('Bump Center:', dv.item())
-    print('Gradient: ', dv.grad.item())
+    print('Bump Center:', dv)
+    print('Gradient: ', dv.grad)
     print('Drag:', drag)
     print('Wall Time:', tt)
     print("#======================================================#")
 
-    with torch.no_grad():
-        dv.grad.zero_()
+    #with torch.no_grad():
+    #    dv.grad.zero_()
 
     ##shutil.move('mesh.su2',f'test_data/mesh_{i}.su2')
     #shutil.move('surface_sens.vtk',f'test_data/sens_{i}.vtk')
 
 # save logs
-name = "log_GD_lr_" + str(lr) + "bump_init_" + str(bc1.item())
+#name = "log_GD_lr_" + str(lr) + "bump_init_" + str(bc1.item())
 #np.save(name, [dvs, drags, times])
 
 #
