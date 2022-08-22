@@ -1,4 +1,4 @@
-cx = 4.8; cz = 0;
+cx = 3.92045775755; cz = 0.0;
 //+
 SetFactory("OpenCASCADE");
 //+
@@ -54,9 +54,9 @@ Fillet{1}{29, 23}{0.2}
 //+
 Field[1] = Box;
 //+
-Field[1].VIn = 0.2;
+Field[1].VIn = 0.08;
 //+
-Field[1].VOut = 0.7;
+Field[1].VOut = 0.65;
 //+
 Field[1].XMax = 10;
 //+
@@ -99,9 +99,9 @@ Physical Surface("lidar") = {50};
 //+
 Field[2] = Ball;
 //+
-Field[2].Radius = 0.1;
+Field[2].Radius = 0.2;
 //+
-Field[2].VIn = 0.05;
+Field[2].VIn = 0.04;
 //+
 Field[2].VOut = 1;
 //+
