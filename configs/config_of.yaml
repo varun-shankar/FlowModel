@@ -1,37 +1,42 @@
 # Init #
 project: 'flow-model'
-job_type: 'train'
-# load_id: '1tjyb3wm'
+job_type: 'eval'
+load_id: '2mlvusq5'
 
 # Data #
 data_module: 'OFDataModule'
-case: '../OpenFoam/cylinder2D_base'
+case: '../../data/cylinder2D_base'
 zones: ['internal','cylinder','inlet','outlet','top','bottom']
-node_basis: 6
-num_nodes: 8000
+irreps_node: '6x0e'
+num_nodes: 14000
 dt: .01
 ts: [3,6]
 test_ts: [6,7.5]
 rollout: 1
 test_rollout: 150
-sample_graph: 'cluster'
-seed_num: 1
-hops: 50
-data_aug: False
+# sample_graph: 'cluster'
+# hops: 300
+rc: [[.1,0,32], [.1,0,32], [.2,0,32]]
 
-# Model #
-rc: .02
-latent_layers: 10
-latent_scalars: 16
-latent_vectors: 16
-latent_tensors: 0
-model_type: 'equivariant'
-act: 'relu'
-solver: 'euler'
-sensitivity: 'autograd'
+# # Model #
+# num_levels: 3
+# cf: [2, 2]
+# skip_mp_levels_all: [[0,1],[0,2],[1,2],[1,2]]
+# latent_layers: 4
+# latent_scalars: 64
+# latent_vectors: 64
+# latent_tensors: 0
+# model_type: 'equivariant'
+# act: 'silu'
+# solver: 'euler'
+# sensitivity: 'autograd'
+# reservoir: True
 
-# Training #
-lr: 0.05
-epochs: 100
-gpus: -1
-noise_var: 0.001
+# # Training #
+# data_aug: False
+# batch_size: 2
+# lr: 0.01
+# lr_sch: True
+# epochs: 100
+# gpus: -1
+# noise_fac: 0.5

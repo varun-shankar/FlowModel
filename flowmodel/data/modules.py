@@ -8,6 +8,7 @@ from torch_geometric.data import Data as pygData
 from torch_geometric.data import Batch as pygBatch
 from torch_geometric.utils import degree
 from e3nn.math import soft_one_hot_linspace
+from math import log
 from e3nn import o3, io
 from torch_geometric.loader import DataLoader, NeighborSampler, RandomNodeSampler
 from torch_geometric.loader import GraphSAINTRandomWalkSampler as RWSampler
@@ -25,25 +26,57 @@ class Data(pygData):
     def rotate(self, rot):
         irreps_in = o3.Irreps(self.irreps_io[0][0]).simplify()
         irreps_out = o3.Irreps(self.irreps_io[0][1]).simplify()
+        irreps_fn = o3.Irreps(self.irreps_io[0][2])
         D_in = irreps_in.D_from_matrix(rot).type_as(self.x)
         D_out = irreps_out.D_from_matrix(rot).type_as(self.x)
+        D_fn = irreps_fn.D_from_matrix(rot).type_as(self.x)
         self.x = self.x @ D_in.T
         self.pos = self.pos @ rot.type_as(self.x).T
         self.y = self.y @ D_out.T
+        self.fn = self.fn @ D_fn.T
         return self, D_out
 
-    def embed(self, num_basis=10):
+    def embed(self, rc, num_basis=16, irreps_sh=o3.Irreps.spherical_harmonics(lmax=2)):
         edge_src, edge_dst = self.edge_index
-        deg = degree(edge_dst, self.num_nodes).type_as(self.x)
+        deg = degree(edge_dst, self.num_nodes).type_as(self.hn)
+        # print(deg.min())
         deg_inv_sqrt = deg.pow(-0.5)
         deg_inv_sqrt[deg_inv_sqrt == float('inf')] = 0
         self.norm = deg_inv_sqrt[edge_src] * deg_inv_sqrt[edge_dst]
         self.norm = self.norm * self.edge_norm if 'edge_norm' in self else self.norm
 
         self.edge_vec = self.pos[edge_dst] - self.pos[edge_src]
-        rc = float(self.rc.max()) if torch.is_tensor(self.rc) else self.rc
-        self.emb = soft_one_hot_linspace(self.edge_vec.norm(dim=1), 0.0, rc, num_basis, 
-            basis='fourier', cutoff=True).mul(num_basis**0.5)
+        # rc = float(self.rc.max()) if torch.is_tensor(self.rc) else self.rc
+        self.fes = soft_one_hot_linspace(self.edge_vec.norm(dim=1), 0.0, rc, num_basis, 
+            basis='smooth_finite', cutoff=False).mul(num_basis**0.5)
+        self.fe = o3.spherical_harmonics(irreps_sh, self.edge_vec, normalize=True, normalization='component')
+
+    def resample_edges(self, rkm):
+        with torch.no_grad():
+            r, k, m = rkm
+            if k != 0:
+                self.edge_index = knn_graph(self.pos, batch=self.batch, k=k)
+            else:
+                self.edge_index = radius_graph(
+                    self.pos, batch=self.batch, r=r, max_num_neighbors=m)
+        avg_nbr = self.edge_index.shape[1]/self.pos.shape[0]
+        if avg_nbr < 5: print(f'Warning: avg neighbors less than 5 ({avg_nbr:.2f})')
+        self.embed(r)
+        return self
+
+    def subsample(self):
+        num_nodes = torch.randint(7000,9000,(1,))
+        with torch.no_grad():
+            dlist = self.to_data_list()
+            for i in range(self.num_graphs):
+                subset = torch.randperm(dlist[i].num_nodes)[:num_nodes]
+                dlist[i] = dlist[i].subgraph(subset)
+                # dlist[i].edge_index = subgraph(subset, dlist[i].edge_index, relabel_nodes=True)
+                # dlist[i].pos = dlist[i].pos[subset]
+                # dlist[i].x = dlist[i].x[subset]
+                # dlist[i].y = dlist[i].y[subset]
+                # dlist[i].fn = dlist[i].fn[subset]
+        return pygBatch.from_data_list(dlist)
 
 def check_sampled_data(dataset):
     nn = 0; ne = 0
@@ -92,16 +125,19 @@ class Cluster_Dataset(NeighborSampler):
         adj, _ = self.adj_t.saint_subgraph(n_id)
         data = RWSampler.__collate__(self, [(n_id, adj)])
         data.irreps_io = data.irreps_io[0]
-        return data
+        return data.subgraph(
+            torch.randperm(
+                data.num_nodes)[:torch.randint(int(0.5*data.num_nodes),data.num_nodes,(1,))]
+        )
 
 ###### OpenFoam #####################################################################################
 
 class OFDataModule(pl.LightningDataModule):
     def __init__(self, case, zones, ts, rc,
-                       num_nodes=-1, sample_graph=False,
+                       num_nodes=-1, sample_graph=None,
                        rollout=1,
                        data_fields=['p','U'], data_irreps=['0e+1o','0e+1o'],
-                       knn=False,
+                       knn=None,
                        train_split=0.9, random_split=False,
                        test_ts=[], test_rollout=0,
                        shuffle=True, batch_size=1, **kwargs):
@@ -140,7 +176,7 @@ class OFDataModule(pl.LightningDataModule):
             # Sample internal nodes
             if self.num_nodes != -1:
                 n_bounds = sum([len(b[i+1]) for i in range(len(b)-1)])
-                torch.manual_seed(42)
+                # torch.manual_seed(42)
                 idx = torch.randperm(p[0].shape[0])[:self.num_nodes-n_bounds]
                 p[0] = p[0][idx,:]; b[0] = b[0][idx]; v[0] = v[0][:,idx,:]
 
@@ -162,15 +198,15 @@ class OFDataModule(pl.LightningDataModule):
             features = v#torch.cat([b1hot.unsqueeze(0).repeat(len(all_ts),1,1),v],dim=-1)
 
             # Generate graph
-            if self.knn:
-                edge_index = knn_graph(pos, k=self.rc)
+            if self.knn != None:
+                edge_index = knn_graph(pos, k=self.knn)
             else:
-                edge_index = radius_graph(pos, r=self.rc, max_num_neighbors=32)
+                edge_index = radius_graph(pos, r=self.rc[0][0], max_num_neighbors=25)
             if int(os.environ.get('LOCAL_RANK', 0)) == 0:
                 print(f'Avg neighbors: {edge_index.shape[1]/pos.shape[0]:.2f}')
 
             ### Generate dataset ###
-            dataset = [Data(x=features[i,:,:], emb_node=b1hot,
+            dataset = [Data(x=features[i,:,:], fn=b1hot,
                             y=fields[i+1:i+1+self.rollout,:,:].transpose(0,1), 
                             irreps_io=self.irreps_io,
                             ts=(all_ts[i:i+1+self.rollout].unsqueeze(0)), 
@@ -185,32 +221,172 @@ class OFDataModule(pl.LightningDataModule):
                 self.train_data = pygBatch.from_data_list(self.train_data)
                 if self.sample_graph == 'random walk':
                     self.train_data = RWSampled_Dataset(self.train_data, 
-                        batch_size=getattr(self,'seed_num',1000), num_steps=self.train_data.num_graphs,
+                        batch_size=getattr(self,'batch_size',1000), num_steps=self.train_data.num_graphs,
                         walk_length=getattr(self,'hops',getattr(self,'latent_layers',10)), 
                         sample_coverage=getattr(self,'sample_coverage',0),
                         save_dir='.')
                 elif self.sample_graph == 'cluster':
                     self.train_data = Cluster_Dataset(self.train_data, 
-                        batch_size=getattr(self,'seed_num',1), num_steps=self.train_data.num_graphs,
+                        batch_size=getattr(self,'batch_size',1), num_steps=self.train_data.num_graphs,
                         sizes=-1*torch.ones(getattr(self,'hops',getattr(self,'latent_layers',10))))
                 else:
                     print('Unknown sampling method')
 
             # Test
-            testset = [Data(x=features[i,:,:], emb_node=b1hot,
+            testset = [Data(x=features[i,:,:], fn=b1hot,
                             y=fields[i+1:i+1+self.rollout,:,:].transpose(0,1), 
                             irreps_io=self.irreps_io,
                             ts=(all_ts[i:i+1+self.rollout].unsqueeze(0)), 
                             pos=pos, edge_index=edge_index, rc=self.rc
                             ) for i in range(
                                 len(self.ts),len(self.ts)+len(self.test_ts)-self.rollout)]
-            testset_rollout = [Data(x=features[i,:,:], emb_node=b1hot,
+            testset_rollout = [Data(x=features[i,:,:], fn=b1hot,
                                 y=fields[i+1:i+1+self.test_rollout,:,:].transpose(0,1), 
                                 irreps_io=self.irreps_io,
                                 ts=(all_ts[i:i+1+self.test_rollout].unsqueeze(0)), 
                                 pos=pos, edge_index=edge_index, rc=self.rc
                                 ) for i in range(
                                 len(self.ts),len(self.ts)+len(self.test_ts)-self.test_rollout)]
+            self.test_data = testset
+            self.test_data_rollout = testset_rollout
+
+    def train_dataloader(self):
+        return DataLoader(self.train_data, batch_size=self.batch_size, shuffle=self.shuffle, num_workers=8)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_data, batch_size=self.batch_size, num_workers=8)
+
+    def test_dataloader(self):
+        return [DataLoader(self.test_data, batch_size=self.batch_size, num_workers=8),
+                DataLoader(self.test_data_rollout, num_workers=8)]
+
+    def loss_fn(self, y_hat, data):
+        return torch.sum((y_hat - data.y.transpose(0,1))**2 * data.node_norm.unsqueeze(-1)) if \
+            'node_norm' in data else torch.mean((y_hat - data.y.transpose(0,1))**2)
+
+
+###### Marsigli #####################################################################################
+
+class MsgDataModule(pl.LightningDataModule):
+    def __init__(self, ts, rc,
+                       dir='/home/vshanka2/data/marsigli/Results/',
+                       num_nodes=-1, sample_graph=None,
+                       rollout=1,
+                       data_fields=['w','s','t'], data_irreps=['3x0e','3x0e'], irreps_node='3x0e+2x1o',
+                       knn=None,
+                       train_split=0.9, random_split=True,
+                       train_cases=[700,900,1100,1300],
+                       test_case=1000, test_rollout=0,
+                       shuffle=True, batch_size=1, **kwargs):
+        super().__init__()
+        self.dir = dir
+        self.ts = ts
+        self.rc = rc
+        self.num_nodes = num_nodes
+        self.sample_graph = sample_graph
+        self.rollout = rollout
+        self.data_fields = data_fields
+        self.data_irreps = data_irreps
+        self.knn = knn
+        self.train_split = train_split
+        self.random_split = random_split
+        self.train_cases = train_cases
+        self.test_case = test_case
+        self.test_rollout = test_rollout
+        self.shuffle = shuffle
+        self.batch_size = batch_size
+        self.irreps_io = self.data_irreps; self.irreps_io.append(irreps_node)
+        self.__dict__.update(kwargs)
+
+    def setup(self, stage: Optional[str] = None):
+        from .load_msg import load_case
+        if stage == 'fit':
+            self.ts = 80*(torch.arange(self.ts)+40)*2
+            dt = 5e-4
+
+            ### Read data ###
+            dataset = []
+            for case in self.train_cases:
+                p, b, v = load_case(self.dir, case, self.ts, self.data_fields)
+                if self.num_nodes != -1:
+                    idx = torch.randperm(p.shape[0])[:self.num_nodes]
+                    p = p[idx,:]; b = b[idx]; v = v[:,idx,:]
+                
+                pos = p
+                b1hot = F.one_hot(b).float()
+                fn = torch.cat([b1hot,
+                    log(case)*torch.ones(pos.shape[0],1), pos-pos.mean(0, keepdim=True),
+                    torch.tensor([0,1,0]).repeat(pos.shape[0],1)],dim=-1)
+
+                # Generate graph
+                if self.knn != None:
+                    edge_index = knn_graph(pos, k=self.knn)
+                else:
+                    edge_index = radius_graph(pos, r=self.rc[0][0], max_num_neighbors=25)
+                if int(os.environ.get('LOCAL_RANK', 0)) == 0:
+                    print(f'Avg neighbors: {edge_index.shape[1]/pos.shape[0]:.2f}')
+
+                set = [Data(x=v[i,:,:], fn=fn,
+                            y=v[i+1:i+1+self.rollout,:,:].transpose(0,1), 
+                            irreps_io=self.irreps_io,
+                            ts=(dt*self.ts[i:i+1+self.rollout].unsqueeze(0)), 
+                            pos=pos, edge_index=edge_index, rc=self.rc
+                            ) for i in range(len(self.ts)-self.rollout)]
+
+                dataset.extend(set)
+
+            if self.random_split:
+                random.shuffle(dataset)
+            self.train_data = dataset[:int((len(dataset)+1)*self.train_split)] 
+            self.val_data = dataset[int((len(dataset)+1)*self.train_split):]
+
+            if self.sample_graph != None:
+                self.train_data = pygBatch.from_data_list(self.train_data)
+                if self.sample_graph == 'random walk':
+                    self.train_data = RWSampled_Dataset(self.train_data, 
+                        batch_size=getattr(self,'batch_size',1000), num_steps=self.train_data.num_graphs,
+                        walk_length=getattr(self,'hops',getattr(self,'latent_layers',10)), 
+                        sample_coverage=getattr(self,'sample_coverage',0),
+                        save_dir='.')
+                elif self.sample_graph == 'cluster':
+                    self.train_data = Cluster_Dataset(self.train_data, 
+                        batch_size=getattr(self,'batch_size',1), num_steps=self.train_data.num_graphs,
+                        sizes=-1*torch.ones(getattr(self,'hops',getattr(self,'latent_layers',10))))
+                else:
+                    print('Unknown sampling method')
+
+            # Test
+            p, b, v = load_case(self.dir, self.test_case, self.ts, self.data_fields)
+            if self.num_nodes != -1:
+                idx = torch.randperm(p.shape[0])[:self.num_nodes]
+                p = p[idx,:]; b = b[idx]; v = v[:,idx,:]
+
+            pos = p
+            b1hot = F.one_hot(b).float()
+            fn = torch.cat([b1hot,
+                log(self.test_case)*torch.ones(pos.shape[0],1), pos-pos.mean(0, keepdim=True),
+                torch.tensor([0,1,0]).repeat(pos.shape[0],1)],dim=-1)
+
+            # Generate graph
+            if self.knn != None:
+                edge_index = knn_graph(pos, k=self.knn)
+            else:
+                edge_index = radius_graph(pos, r=self.rc[0][0], max_num_neighbors=25)
+            if int(os.environ.get('LOCAL_RANK', 0)) == 0:
+                print(f'Avg neighbors: {edge_index.shape[1]/pos.shape[0]:.2f}')
+
+            testset = [Data(x=v[i,:,:], fn=fn,
+                            y=v[i+1:i+1+self.rollout,:,:].transpose(0,1), 
+                            irreps_io=self.irreps_io,
+                            ts=(dt*self.ts[i:i+1+self.rollout].unsqueeze(0)), 
+                            pos=pos, edge_index=edge_index, rc=self.rc
+                            ) for i in range(len(self.ts)-self.rollout)]
+            testset_rollout = [Data(x=v[i,:,:], fn=fn,
+                                y=v[i+1:i+1+self.test_rollout,:,:].transpose(0,1), 
+                                irreps_io=self.irreps_io,
+                                ts=(dt*self.ts[i:i+1+self.test_rollout].unsqueeze(0)), 
+                                pos=pos, edge_index=edge_index, rc=self.rc
+                                ) for i in range(len(self.ts)-self.test_rollout)]
             self.test_data = testset
             self.test_data_rollout = testset_rollout
 
@@ -274,12 +450,12 @@ class KaggleDataModule(pl.LightningDataModule):
             for c in self.cases:
                 p, v, l = load_kaggle(self.dir,self.turb_model,c,fields=self.data_fields,label=self.label)
                 if self.num_nodes != -1:
-                    torch.manual_seed(42)
+                    # torch.manual_seed(42)
                     idx = torch.randperm(p.shape[0])[:self.num_nodes]
                     p = p[idx,:]; v = v[idx,:]; l = torch.index_select(l,0,idx)
                 pos = p
                 
-                emb_node = v[:,0:1]; v = v[:,1:]
+                fn = v[:,0:1]; v = v[:,1:]
                 # v[:,0:2] = (v[:,0:2]-torch.mean(v[:,0:2],dim=(0,),keepdim=True))/ \
                 #     torch.std(v[:,0:2],dim=(0,),keepdim=True)
                 # v[:,2:] = (v[:,2:]-torch.mean(v[:,2:],dim=(0,),keepdim=True))/ \
@@ -302,7 +478,7 @@ class KaggleDataModule(pl.LightningDataModule):
                 print('Avg neighbors = ', edge_index.shape[1]/pos.shape[0])
 
                 data = Data(x=features, y=fields.unsqueeze(0), irreps_io=self.irreps_io,
-                            dts=torch.ones(1), emb_node=emb_node,
+                            dts=torch.ones(1), fn=fn,
                             pos=pos, edge_index=edge_index, rc=rc)
                 dataset.append(data)
 
@@ -320,7 +496,7 @@ class KaggleDataModule(pl.LightningDataModule):
                     p = p[idx,:]; v = v[idx,:]; l = torch.index_select(l,0,idx)
                 pos = p
 
-                emb_node = v[:,0:1]; v = v[:,1:]
+                fn = v[:,0:1]; v = v[:,1:]
                 um = v[:,1:].norm(dim=-1).mean()
                 v[:,:1] /= um**2
                 v[:,1:] /= um
@@ -338,7 +514,7 @@ class KaggleDataModule(pl.LightningDataModule):
                     print(f'Avg neighbors: {edge_index.shape[1]/pos.shape[0]:.2f}')
 
                 data = Data(x=features, y=fields.unsqueeze(0), irreps_io=self.irreps_io,
-                            dts=torch.ones(1), emb_node=emb_node,
+                            dts=torch.ones(1), fn=fn,
                             pos=pos, edge_index=edge_index, rc=rc)
                 testset.append(data)
 
@@ -414,7 +590,7 @@ class NekDataModule(pl.LightningDataModule):
             # v[:,:,1:] /= um
             fields = v
             features = v
-            emb_node = torch.ones(pos.shape[0],1)
+            fn = torch.ones(pos.shape[0],1)
 
             # Generate graph
             if self.knn:
@@ -426,7 +602,7 @@ class NekDataModule(pl.LightningDataModule):
 
             ### Generate dataset ###
             dataset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], irreps_io=self.irreps_io,
-                            dts=torch.diff(all_ts[i:i+1+self.rollout]), emb_node=emb_node,
+                            dts=torch.diff(all_ts[i:i+1+self.rollout]), fn=fn,
                             pos=pos, edge_index=edge_index, rc=self.rc) for i in range(len(self.ts)-self.rollout)]
             if self.random_split:
                 random.shuffle(dataset)
@@ -435,11 +611,11 @@ class NekDataModule(pl.LightningDataModule):
 
             # Test
             testset = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.rollout,:,:], irreps_io=self.irreps_io,
-                            dts=torch.diff(all_ts[i:i+1+self.rollout]), emb_node=emb_node,
+                            dts=torch.diff(all_ts[i:i+1+self.rollout]), fn=fn,
                             pos=pos, edge_index=edge_index, rc=self.rc) for i in range(
                                 len(self.ts),len(self.ts)+len(self.test_ts)-self.rollout)]
             testset_rollout = [Data(x=features[i,:,:], y=fields[i+1:i+1+self.test_rollout,:,:], irreps_io=self.irreps_io,
-                            dts=torch.diff(all_ts[i:i+1+self.test_rollout]), emb_node=emb_node,
+                            dts=torch.diff(all_ts[i:i+1+self.test_rollout]), fn=fn,
                             pos=pos, edge_index=edge_index, rc=self.rc) for i in range(
                                 len(self.ts),len(self.ts)+len(self.test_ts)-self.test_rollout)]
             self.test_data = testset
@@ -500,7 +676,7 @@ class SU2DataModule(pl.LightningDataModule):
                 # Sample internal nodes
                 if self.num_nodes != -1:
                     n_bounds = sum(b!=0)
-                    torch.manual_seed(42)
+                    # torch.manual_seed(42)
                     idx = torch.cat([(b!=0).nonzero().flatten(),
                         (b==0).nonzero().flatten()[
                             torch.randperm(sum(b==0))[:self.num_nodes-n_bounds]]],dim=0)
@@ -523,7 +699,7 @@ class SU2DataModule(pl.LightningDataModule):
                 neighbors.append(edge_index.shape[1]/pos.shape[0])
 
                 data = Data(x=p-p.mean(dim=0), y=v.unsqueeze(0), irreps_io=self.irreps_io,
-                            dts=torch.ones(1), emb_node=b1hot,
+                            dts=torch.ones(1), fn=b1hot,
                             pos=pos, edge_index=edge_index, rc=self.rc)
                 dataset.append(data)
             if int(os.environ.get('LOCAL_RANK', 0)) == 0:
@@ -545,7 +721,7 @@ class SU2DataModule(pl.LightningDataModule):
                 # Sample internal nodes
                 if self.num_nodes != -1:
                     n_bounds = sum(b!=0)
-                    torch.manual_seed(42)
+                    # torch.manual_seed(42)
                     idx = torch.cat([(b!=0).nonzero().flatten(),
                         (b==0).nonzero().flatten()[
                             torch.randperm(sum(b==0))[:self.num_nodes-n_bounds]]],dim=0)
@@ -568,7 +744,7 @@ class SU2DataModule(pl.LightningDataModule):
                 neighbors.append(edge_index.shape[1]/pos.shape[0])
 
                 data = Data(x=p-p.mean(dim=0), y=v.unsqueeze(0), irreps_io=self.irreps_io,
-                            dts=torch.ones(1), emb_node=b1hot,
+                            dts=torch.ones(1), fn=b1hot,
                             pos=pos, edge_index=edge_index, rc=self.rc)
                 testset.append(data)
             print('Avg neighbors = ', sum(neighbors)/len(neighbors))
@@ -585,7 +761,7 @@ class SU2DataModule(pl.LightningDataModule):
 
     def loss_fn(self, y_hat, data):
         l1 = F.mse_loss(y_hat[:,:,:-3], data.y[:,:,:-3])
-        l2 = F.mse_loss(y_hat[:,data.emb_node[:,1].bool(),-3:], 
-                  data.y[:,data.emb_node[:,1].bool(),-3:])
+        l2 = F.mse_loss(y_hat[:,data.fn[:,1].bool(),-3:], 
+                  data.y[:,data.fn[:,1].bool(),-3:])
 
         return (1-self.alpha)*l1 + self.alpha*l2

@@ -1,0 +1,39 @@
+# Init #
+project: 'flow-model'
+job_type: 'retrain'
+# load_id: '1bmudqa5'
+
+# Data #
+data_module: 'MsgDataModule'
+irreps_node: '3x0e+2x1o'
+train_cases: [700,900,1100,1300]
+test_case: 1000
+num_nodes: -1
+ts: 21
+rollout: 1
+test_rollout: 20
+# sample_graph: 'cluster'
+# hops: 500
+rc: [[.05,0,24], [.1,0,24], [.2,0,24]]
+
+# Model #
+num_levels: 2
+cf: [8]
+skip_mp_levels_all: [[0],[0],[1],[1],[1],[1]]
+latent_layers: 6
+latent_scalars: 128
+latent_vectors: 16
+latent_tensors: 0
+model_type: 'non-equivariant'
+act: 'relu'
+solver: 'euler'
+sensitivity: 'autograd'
+
+# Training #
+data_aug: True
+batch_size: 4
+lr: 0.0005
+# lr_sch: True
+epochs: 100
+gpus: -1
+noise_fac: 0.1

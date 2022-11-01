@@ -1,7 +1,7 @@
 import torch
 from torch_scatter import scatter
 from e3nn import o3, nn
-from torch.nn import ReLU, Tanh, SiLU, Sigmoid, Linear
+from torch.nn import ReLU, Tanh, SiLU, Sigmoid, ELU, Linear
 from .utils import *
 from torch_geometric.nn import GCNConv, EdgeConv
 from torchdyn.core import NeuralODE
@@ -70,6 +70,83 @@ class Eq_NLMP2(torch.nn.Module):
         data.he += self.tp2(tmp, sh, self.fc2(data.emb))
         node_ftr = scatter(data.he*data.norm.view(-1, 1), edge_dst, dim=0, dim_size=data.num_nodes)
         data.hn += self.lin(torch.cat([data.hn,node_ftr],dim=1))
+        
+        return data
+
+class Eq_NLMP3(torch.nn.Module):
+    def __init__(self, irreps_input, irreps_output,
+                       irreps_sh=o3.Irreps.spherical_harmonics(lmax=2),
+                       edge_basis=16, fch=16, **kwargs):
+        super(Eq_NLMP3, self).__init__()
+
+        self.irreps_input = o3.Irreps(irreps_input)
+        self.irreps_output = o3.Irreps(irreps_output)
+        hfac = 4
+
+        self.irreps_sh = o3.Irreps(irreps_sh)
+        self.edge_val = torch.nn.Sequential(
+            o3GatedLinear(3*self.irreps_input, (hfac*self.irreps_output).sort().irreps.simplify(), **kwargs),
+            o3.Linear((hfac*self.irreps_output).sort().irreps.simplify(), self.irreps_sh)
+        )
+
+        self.tp = o3.FullyConnectedTensorProduct(self.irreps_sh, self.irreps_sh, self.irreps_output, shared_weights=False)
+        self.fc = nn.FullyConnectedNet([edge_basis, fch, self.tp.weight_numel], torch.relu)
+
+        self.edge_upd = torch.nn.Sequential(
+            o3GatedLinear(self.tp.irreps_out+2*self.irreps_input, (hfac*self.irreps_output).sort().irreps.simplify(), **kwargs),
+            o3.Linear((hfac*self.irreps_output).sort().irreps.simplify(), self.irreps_output)
+        )
+        self.node_lin = torch.nn.Sequential(
+            o3GatedLinear(self.irreps_input+self.irreps_output, (hfac*self.irreps_output).sort().irreps.simplify(), **kwargs),
+            o3.Linear((hfac*self.irreps_output).sort().irreps.simplify(), self.irreps_output)
+        )
+
+    def forward(self, data):
+        
+        edge_src, edge_dst = data.edge_index
+        v = self.edge_val(torch.cat([data.he,data.hn[edge_src],data.hn[edge_dst]],dim=1))
+        
+        data.he += self.edge_upd(torch.cat([self.tp(v, data.fe, self.fc(data.fes)),data.hn[edge_src],data.hn[edge_dst]],dim=1))
+        node_ftr = scatter(data.he*data.norm.view(-1, 1), edge_dst, dim=0, dim_size=data.num_nodes)
+        data.hn += self.node_lin(torch.cat([data.hn,node_ftr],dim=1))
+        
+        return data
+
+class nEq_NLMP3(torch.nn.Module):
+    def __init__(self, irreps_input, irreps_output,
+                       irreps_sh=o3.Irreps.spherical_harmonics(lmax=2),
+                       edge_basis=16, fch=16, act=ReLU(), **kwargs):
+        super(nEq_NLMP3, self).__init__()
+
+        self.irreps_input = o3.Irreps(irreps_input).dim
+        self.irreps_output = o3.Irreps(irreps_output).dim
+        hfac = 4
+
+        self.irreps_sh = o3.Irreps(irreps_sh).dim
+        self.edge_val = torch.nn.Sequential(
+            Linear(3*self.irreps_input, (hfac*self.irreps_output)), act,
+            Linear((hfac*self.irreps_output), self.irreps_sh)
+        )
+
+        self.tp = Linear(2*self.irreps_sh+edge_basis, self.irreps_output)
+
+        self.edge_upd = torch.nn.Sequential(
+            Linear(self.irreps_output+2*self.irreps_input, (hfac*self.irreps_output)), act,
+            Linear((hfac*self.irreps_output), self.irreps_output)
+        )
+        self.node_lin = torch.nn.Sequential(
+            Linear(self.irreps_input+self.irreps_output, (hfac*self.irreps_output)), act,
+            Linear((hfac*self.irreps_output), self.irreps_output)
+        )
+
+    def forward(self, data):
+        
+        edge_src, edge_dst = data.edge_index
+        v = self.edge_val(torch.cat([data.he,data.hn[edge_src],data.hn[edge_dst]],dim=1))
+        
+        data.he += self.edge_upd(torch.cat([self.tp(torch.cat([v, data.fe, data.fes],dim=1)),data.hn[edge_src],data.hn[edge_dst]],dim=1))
+        node_ftr = scatter(data.he*data.norm.view(-1, 1), edge_dst, dim=0, dim_size=data.num_nodes)
+        data.hn += self.node_lin(torch.cat([data.hn,node_ftr],dim=1))
         
         return data
 
